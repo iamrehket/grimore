@@ -198,9 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         payload = load_payload(args.payload)
         for w in resolve_hunks(payload, args.repo.resolve()):
             print(f"WARNING: {w}", file=sys.stderr)
+        rendered = render_html(payload) if args.format == "html" else render_md(payload)
         if args.write_hashes:
             write_hashes(payload, args.payload)
-        rendered = render_html(payload) if args.format == "html" else render_md(payload)
     except PayloadError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

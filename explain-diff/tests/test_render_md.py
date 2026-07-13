@@ -69,3 +69,16 @@ def test_cli_write_hashes(repo, tmp_path):
     rc = main([str(p), "--format", "md", "--repo", str(repo), "--out", str(tmp_path / "g.md"), "--write-hashes"])
     assert rc == 0
     assert json.loads(p.read_text())["sections"][3]["sha256"]
+
+
+def test_write_hashes_skipped_on_render_failure(repo, tmp_path, monkeypatch):
+    import render as render_mod
+    def boom(payload):
+        raise render_mod.PayloadError("boom")
+    monkeypatch.setattr(render_mod, "render_md", boom)
+    p = tmp_path / "payload.json"
+    p.write_text(json.dumps(full_payload()))
+    before = p.read_text()
+    rc = main([str(p), "--format", "md", "--repo", str(repo), "--write-hashes"])
+    assert rc == 1
+    assert p.read_text() == before
