@@ -59,6 +59,8 @@ def load_payload(path: Path) -> dict:
 def extract_hunk(hunk: dict, repo_root: Path) -> tuple[str, str]:
     start, end = (int(n) for n in hunk["lines"].split("-"))
     where = f"{hunk['file']}:{hunk['lines']} @ {hunk['ref']}"
+    if start < 1 or end < start:
+        raise PayloadError(f"{where}: invalid line range (need 1 <= start <= end)")
     if hunk["ref"] == "WORKTREE":
         target = repo_root / hunk["file"]
         if not target.is_file():

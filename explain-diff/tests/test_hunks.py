@@ -46,6 +46,13 @@ def test_out_of_range_raises(repo):
         extract_hunk(bad, repo)
 
 
+def test_reversed_or_zero_range_raises(repo):
+    for bad_lines in ("5-3", "0-4"):
+        bad = hunk("WORKTREE") | {"lines": bad_lines}
+        with pytest.raises(PayloadError, match=bad_lines):
+            extract_hunk(bad, repo)
+
+
 def test_resolve_warns_on_drift(repo):
     h = hunk("WORKTREE") | {"sha256": "not-the-real-hash"}
     payload = {"sections": [h]}
