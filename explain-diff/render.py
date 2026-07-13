@@ -12,6 +12,11 @@ import subprocess
 from pathlib import Path
 
 import jsonschema
+from markdown_it import MarkdownIt
+from pygments import highlight as pygments_highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import TextLexer, get_lexer_for_filename
+from pygments.util import ClassNotFound
 
 SKILL_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = SKILL_DIR / "schema.json"
@@ -48,6 +53,7 @@ def load_payload(path: Path) -> dict:
         raise PayloadError(f"duplicate section ids: {dupes}")
     for s in payload["sections"]:
         if s["type"] == "diagram":
+            check_mermaid(s["mermaid"])
             for node, anchor in s.get("links", {}).items():
                 if anchor.lstrip("#") not in ids:
                     raise PayloadError(
@@ -107,3 +113,30 @@ def write_hashes(payload: dict, path: Path) -> None:
         return obj
 
     path.write_text(json.dumps(clean(payload), indent=2) + "\n")
+
+
+MERMAID_TYPES = (
+    "flowchart", "graph", "sequenceDiagram", "stateDiagram", "classDiagram",
+    "erDiagram", "gantt", "pie", "mindmap", "timeline", "journey",
+)
+_MD = MarkdownIt("commonmark").enable("table")
+
+
+def check_mermaid(src: str) -> None:
+    first = next((line.strip() for line in src.splitlines() if line.strip()), "")
+    if not first.startswith(MERMAID_TYPES):
+        raise PayloadError(
+            f"mermaid block must start with a diagram type {MERMAID_TYPES}, got: {first!r}"
+        )
+
+
+def md_to_html(text: str) -> str:
+    return _MD.render(text)
+
+
+def highlight_code(code: str, filename: str) -> str:
+    try:
+        lexer = get_lexer_for_filename(filename)
+    except ClassNotFound:
+        lexer = TextLexer()
+    return pygments_highlight(code, lexer, HtmlFormatter(cssclass="highlight"))
