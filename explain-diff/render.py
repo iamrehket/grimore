@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import html as html_mod
 import json
-import re
 import subprocess
 import sys
 import webbrowser
@@ -130,12 +129,6 @@ MERMAID_TYPES = (
     "classDiagram", "erDiagram", "gantt", "pie", "mindmap", "timeline", "journey",
 )
 _MD = MarkdownIt("commonmark", options_update={"html": False}).enable("table")
-# Belt-and-suspenders: MarkdownIt with html=False already refuses to parse raw
-# HTML as markup (it falls back to escaped text), but the literal tag source
-# - including attribute names like `onerror` - still survives as inert text.
-# Strip anything that looks like an HTML tag/comment/declaration before the
-# markdown pass so no author-supplied markup fragments reach the page at all.
-_RAW_HTML_RE = re.compile(r"<!--.*?-->|<[!?/]?[A-Za-z][^>]*>", re.DOTALL)
 
 
 def check_mermaid(src: str) -> None:
@@ -148,7 +141,7 @@ def check_mermaid(src: str) -> None:
 
 
 def md_to_html(text: str) -> str:
-    return _MD.render(_RAW_HTML_RE.sub("", text))
+    return _MD.render(text)
 
 
 def highlight_code(code: str, filename: str) -> str:

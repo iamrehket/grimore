@@ -71,7 +71,8 @@ def test_user_html_is_escaped(repo, fake_mermaid):
     resolve_hunks(payload, repo)
     html = render_html(payload)
     assert "<script>alert(1)</script>" not in html
-    assert "onerror" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<img src=x" not in html
     assert "T &lt;b&gt;bold&lt;/b&gt;" in html
 
 
