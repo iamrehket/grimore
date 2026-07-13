@@ -6,9 +6,12 @@
 """Render an explain-diff payload (JSON + markdown) to a self-contained HTML guide or plain markdown."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import subprocess
+import sys
+import webbrowser
 from pathlib import Path
 
 import jsonschema
@@ -141,3 +144,73 @@ def highlight_code(code: str, filename: str) -> str:
     except ClassNotFound:
         lexer = TextLexer()
     return pygments_highlight(code, lexer, HtmlFormatter(cssclass="highlight"))
+
+
+MODE_LABELS = {"warm": "live session", "cold": "cold read"}
+
+
+def render_md(payload: dict) -> str:
+    out = [f"# {payload['title']}", "", f"> {payload['verdict']}", "",
+           f"_{MODE_LABELS[payload['mode']]} - diff: `{payload['diff']}`_", ""]
+    questions = []
+    for s in payload["sections"]:
+        t = s["type"]
+        if t == "narrative":
+            out += [f"## {s['heading']}", "", s["md"], ""]
+        elif t == "diagram":
+            out += [f"## {s['heading']}", "", "```mermaid", s["mermaid"], "```", ""]
+        elif t == "decision":
+            out += [f"## Decision: {s['title']}",
+                    f"_{s['provenance']}, reversal cost: {s['reversal_cost']}_", "", s["md"], ""]
+            if s.get("alternatives"):
+                out += ["Alternatives considered:"] + [f"- {a}" for a in s["alternatives"]] + [""]
+        elif t == "hunk":
+            lang = Path(s["file"]).suffix.lstrip(".")
+            out += [f"### `{s['file']}:{s['lines']} @ {s['ref']}`", "", s["md"], "",
+                    f"```{lang}", s["_code"], "```", ""]
+        elif t == "comparison":
+            out += [f"## {s['heading']}", "", "**Before:**", "", s["before_md"], "",
+                    "**After:**", "", s["after_md"], ""]
+        elif t == "question":
+            questions.append(f"- [ ] **{s['id']}**: {s['md']}")
+        elif t == "fallout":
+            out += [f"## {s.get('heading', 'Mechanical fallout')}", ""]
+            out += [f"- {item}" for item in s["items"]] + [""]
+    if questions:
+        out += ["## Open questions", ""] + questions + [""]
+    return "\n".join(out)
+
+
+def render_html(payload: dict) -> str:
+    raise PayloadError("html renderer not built yet")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("payload", type=Path)
+    ap.add_argument("--format", choices=["html", "md"], default="html")
+    ap.add_argument("--out", type=Path)
+    ap.add_argument("--open", action="store_true", dest="open_after")
+    ap.add_argument("--write-hashes", action="store_true")
+    ap.add_argument("--repo", type=Path, default=Path("."))
+    args = ap.parse_args(argv)
+    try:
+        payload = load_payload(args.payload)
+        for w in resolve_hunks(payload, args.repo.resolve()):
+            print(f"WARNING: {w}", file=sys.stderr)
+        if args.write_hashes:
+            write_hashes(payload, args.payload)
+        rendered = render_html(payload) if args.format == "html" else render_md(payload)
+    except PayloadError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    out_path = args.out or args.payload.with_suffix(f".{args.format}")
+    out_path.write_text(rendered)
+    print(out_path)
+    if args.open_after:
+        webbrowser.open(out_path.resolve().as_uri())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
