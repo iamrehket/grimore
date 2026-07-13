@@ -167,7 +167,9 @@ footer#composer button{font:inherit;font-size:.85rem;padding:.35rem 1rem;border-
       if (!svg) return;
       Object.keys(links).forEach(function (label) {
         svg.querySelectorAll("g.node").forEach(function (node) {
-          if (node.textContent.trim().indexOf(label) !== -1) {
+          var hit = (node.id && node.id.indexOf("-" + label + "-") !== -1) ||
+                    node.textContent.trim().indexOf(label) !== -1;
+          if (hit) {
             node.classList.add("linked");
             node.dataset.anchor = links[label];
             node.addEventListener("click", function () { location.hash = links[label]; });
