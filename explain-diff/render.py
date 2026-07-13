@@ -6,7 +6,9 @@
 """Render an explain-diff payload (JSON + markdown) to a self-contained HTML guide or plain markdown."""
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import jsonschema
@@ -52,3 +54,54 @@ def load_payload(path: Path) -> dict:
                         f"diagram link {node!r} -> {anchor!r} targets no decision/question id"
                     )
     return payload
+
+
+def extract_hunk(hunk: dict, repo_root: Path) -> tuple[str, str]:
+    start, end = (int(n) for n in hunk["lines"].split("-"))
+    where = f"{hunk['file']}:{hunk['lines']} @ {hunk['ref']}"
+    if hunk["ref"] == "WORKTREE":
+        target = repo_root / hunk["file"]
+        if not target.is_file():
+            raise PayloadError(f"hunk file not found on disk: {hunk['file']}")
+        text = target.read_text()
+    else:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "show", f"{hunk['ref']}:{hunk['file']}"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            raise PayloadError(f"cannot resolve {where}: {proc.stderr.strip()}")
+        text = proc.stdout
+    lines = text.splitlines()[start - 1 : end]
+    if len(lines) < (end - start + 1):
+        raise PayloadError(f"{where}: file has fewer lines than requested range {start}-{end}")
+    code = "\n".join(lines)
+    return code, hashlib.sha256(code.encode()).hexdigest()[:16]
+
+
+def resolve_hunks(payload: dict, repo_root: Path) -> list[str]:
+    warnings = []
+    for s in payload["sections"]:
+        if s["type"] != "hunk":
+            continue
+        s["_code"], s["_sha256"] = extract_hunk(s, repo_root)
+        if s.get("sha256") and s["sha256"] != s["_sha256"]:
+            warnings.append(
+                f"hunk {s['file']}:{s['lines']} has drifted since hashes were written; "
+                "annotations may no longer match the code"
+            )
+    return warnings
+
+
+def write_hashes(payload: dict, path: Path) -> None:
+    def clean(obj):
+        if isinstance(obj, dict):
+            out = {k: clean(v) for k, v in obj.items() if not k.startswith("_")}
+            if obj.get("type") == "hunk" and "_sha256" in obj:
+                out["sha256"] = obj["_sha256"]
+            return out
+        if isinstance(obj, list):
+            return [clean(v) for v in obj]
+        return obj
+
+    path.write_text(json.dumps(clean(payload), indent=2) + "\n")
