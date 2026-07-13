@@ -18,6 +18,15 @@ def test_empty_mermaid_rejected():
         check_mermaid("   \n  ")
 
 
+def test_prefix_collision_rejected():
+    with pytest.raises(PayloadError, match="diagram type"):
+        check_mermaid("graphite\n  A --> B")
+
+
+def test_state_diagram_v2_passes():
+    check_mermaid("stateDiagram-v2\n  [*] --> A")
+
+
 def test_md_to_html_renders_emphasis_and_code():
     html = md_to_html("uses `outbox` and **must** dedup")
     assert "<code>outbox</code>" in html and "<strong>must</strong>" in html

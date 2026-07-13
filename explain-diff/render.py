@@ -116,15 +116,16 @@ def write_hashes(payload: dict, path: Path) -> None:
 
 
 MERMAID_TYPES = (
-    "flowchart", "graph", "sequenceDiagram", "stateDiagram", "classDiagram",
-    "erDiagram", "gantt", "pie", "mindmap", "timeline", "journey",
+    "flowchart", "graph", "sequenceDiagram", "stateDiagram", "stateDiagram-v2",
+    "classDiagram", "erDiagram", "gantt", "pie", "mindmap", "timeline", "journey",
 )
 _MD = MarkdownIt("commonmark").enable("table")
 
 
 def check_mermaid(src: str) -> None:
     first = next((line.strip() for line in src.splitlines() if line.strip()), "")
-    if not first.startswith(MERMAID_TYPES):
+    token = first.split()[0] if first else ""
+    if token not in MERMAID_TYPES:
         raise PayloadError(
             f"mermaid block must start with a diagram type {MERMAID_TYPES}, got: {first!r}"
         )
