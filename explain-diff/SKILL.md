@@ -23,9 +23,11 @@ hand-write HTML. Never paste code into the payload; point at it.
 3. Render and open:
 
    ```bash
-   uv run <skill-dir>/render.py explanation.json --repo <repo-root> --open --write-hashes
+   uv run <skill-dir>/render.py explanation.json --repo <repo-root> --out <path> --open --write-hashes
    ```
 
+   `--out` controls where the rendered file lands (default: next to the payload,
+   with the format's extension).
    Markdown target (PR descriptions, docs): add `--format md`.
    The script fails loudly on schema violations, bad hunk refs, dangling ids,
    or malformed mermaid - fix the payload and re-run. A drift WARNING means
@@ -76,13 +78,15 @@ Section vocabulary:
 Rules:
 - Ids are lowercase (`d1`, `q1`, ...) and unique; diagram `links` must target them.
 - No emojis anywhere in the payload.
-- Always pass `--write-hashes` on first render so later re-renders detect drift.
+- When the payload has `hunk` sections, pass `--write-hashes` on first render
+  so later re-renders detect drift (it is a no-op without hunks).
 - Line numbers in `hunk` refer to the file at `ref` (for WORKTREE: as on disk
   now). Verify with `sed -n 'START,ENDp' file` before authoring.
 
 ## Sizing
 
 Small diff (< 100 lines): verdict, one narrative, 1-2 decisions or questions.
-Skip diagrams. Medium: add hunks and a comparison. Large: full vocabulary,
+Skip diagrams; include at most one hunk, and only if a single piece of code
+carries the change. Medium: add hunks and a comparison. Large: full vocabulary,
 but still 2-5 moves - if you need more, the change should have been split,
 and saying so is part of the explanation.
