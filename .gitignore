@@ -1,1 +1,5 @@
 .DS_Store
+.superpowers/
+__pycache__/
+.pytest_cache/
+.playwright-mcp/

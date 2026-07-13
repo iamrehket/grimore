@@ -1,0 +1,50 @@
+{
+  "title": "Example: retry queue for webhook delivery",
+  "verdict": "Webhook delivery moves from fire-and-forget to an at-least-once outbox worker.",
+  "mode": "warm",
+  "diff": "main...HEAD",
+  "sections": [
+    {
+      "type": "narrative",
+      "heading": "What changed",
+      "md": "Webhooks now **enqueue** into an `outbox` table instead of firing inline during the request. A worker claims rows with a lease and delivers them, retrying on failure."
+    },
+    {
+      "type": "diagram",
+      "heading": "New delivery path",
+      "mermaid": "flowchart LR\n  API[API handler] --> OB[(outbox table)]\n  OB --> W[worker]\n  W --> EP[endpoint]\n  W -->|failure| OB",
+      "links": { "OB": "#d1", "W": "#q1" }
+    },
+    {
+      "type": "decision",
+      "id": "d1",
+      "title": "At-least-once over exactly-once",
+      "provenance": "stated",
+      "reversal_cost": "high",
+      "md": "Receivers must **dedup by event id**. Exactly-once would require distributed transactions between our DB and every receiver.",
+      "alternatives": ["exactly-once via 2PC", "best-effort with no retries (status quo)"]
+    },
+    {
+      "type": "hunk",
+      "file": "render.py",
+      "lines": "1-12",
+      "ref": "WORKTREE",
+      "md": "Example annotation: in a real guide this points at the load-bearing hunk and explains what makes it safe."
+    },
+    {
+      "type": "comparison",
+      "heading": "Send path",
+      "before_md": "`send_webhook()` called inline; a slow endpoint stalls the request thread.",
+      "after_md": "Request writes one row; the worker owns delivery, retries, and backoff."
+    },
+    {
+      "type": "question",
+      "id": "q1",
+      "md": "Cap retries at 24h and dead-letter, or retry forever?"
+    },
+    {
+      "type": "fallout",
+      "items": ["renamed sender.py to outbox.py", "import updates in 6 call sites"]
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+:root{
+  --bg:#f7f7f5;--panel:#ffffff;--ink:#1a1a1a;--muted:#6b6b6b;--line:#e2e2dd;
+  --accent:#2f6f4f;--low:#5e8c62;--medium:#b3831f;--high:#b3402f;--code-bg:#f0f0ec;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#161618;--panel:#1f1f23;--ink:#e8e8e4;--muted:#9a9a94;--line:#33333a;
+        --accent:#7bbf9a;--low:#8fbf94;--medium:#d9a94a;--high:#d97862;--code-bg:#26262c;}
+}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+code,pre{font:13px/1.5 ui-monospace,"SF Mono",Menlo,monospace;}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;}
+pre code{background:none;padding:0;}
+header.page{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:.9rem 1.5rem;}
+header.page h1{margin:0;font-size:1.15rem;display:inline;}
+header.page .verdict{margin:.25rem 0 0;font-size:.95rem;color:var(--muted);}
+.badge{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);
+       border-radius:99px;padding:.15rem .6rem;margin-left:.6rem;vertical-align:middle;color:var(--muted);}
+.badge.warm{border-color:var(--accent);color:var(--accent);}
+.badge.cold{border-color:var(--medium);color:var(--medium);}
+.diffref{font-size:.75rem;color:var(--muted);margin:.15rem 0 0;}
+main,nav#toc{max-width:60rem;margin:0 auto;padding:0 1.5rem;}
+nav#toc{padding-top:1rem;font-size:.85rem;color:var(--muted);}
+nav#toc a{color:inherit;margin-right:1rem;}
+section{margin:2rem auto;}
+section h2{font-size:1.05rem;border-bottom:1px solid var(--line);padding-bottom:.3rem;}
+.card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);
+      border-radius:8px;padding:1rem 1.25rem;}
+.card.rc-low{border-left-color:var(--low);}
+.card.rc-medium{border-left-color:var(--medium);}
+.card.rc-high{border-left-color:var(--high);}
+.card h3{margin:0 0 .25rem;font-size:1rem;}
+.card .tags{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.card.hl-card{outline:2px solid var(--accent);}
+.alts{font-size:.9rem;color:var(--muted);}
+.hunk{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+.hunk-meta{padding:.4rem .9rem;border-bottom:1px solid var(--line);font-size:.8rem;color:var(--muted);}
+.hunk-body{display:grid;grid-template-columns:minmax(14rem,1fr) 2fr;}
+.hunk-body .annotation{padding:.75rem 1rem;border-right:1px solid var(--line);font-size:.92rem;}
+.hunk-body .code{overflow-x:auto;background:var(--code-bg);}
+.hunk-body .code pre{margin:0;padding:.75rem 1rem;}
+@media (max-width:50rem){.hunk-body{grid-template-columns:1fr}.hunk-body .annotation{border-right:none;border-bottom:1px solid var(--line);}}
+.comparison{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+.comparison>div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.75rem 1rem;}
+.comparison h4{margin:.1rem 0 .4rem;font-size:.8rem;text-transform:uppercase;color:var(--muted);}
+details.fallout{color:var(--muted);font-size:.9rem;}
+.mermaid-wrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow:hidden;}
+.mermaid-wrap svg{max-width:100%;height:auto;touch-action:none;}
+g.node.linked{cursor:pointer;}
+g.node.linked rect,g.node.linked circle,g.node.linked polygon{stroke:var(--accent);stroke-width:2px;}
+g.node.hl rect,g.node.hl circle,g.node.hl polygon{fill:var(--accent);fill-opacity:.25;}
+.respond{margin-top:.75rem;border-top:1px dashed var(--line);padding-top:.6rem;}
+.respond button{font:inherit;font-size:.8rem;padding:.25rem .8rem;margin-right:.4rem;border-radius:6px;
+                border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;}
+.respond button.active{border-color:var(--accent);background:var(--accent);color:var(--panel);}
+.respond textarea{display:block;width:100%;margin-top:.5rem;font:inherit;font-size:.85rem;
+                  background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:.4rem;}
+footer#composer{position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+                padding:.6rem 1.5rem;display:flex;justify-content:space-between;align-items:center;z-index:10;}
+footer#composer button{font:inherit;font-size:.85rem;padding:.35rem 1rem;border-radius:6px;
+                       border:1px solid var(--accent);background:var(--accent);color:var(--panel);cursor:pointer;}
+#tally{font-size:.85rem;color:var(--muted);}
+{{PYGMENTS_CSS}}
+@media print{
+  header.page{position:static;}
+  nav#toc,footer#composer,.respond{display:none;}
+  body{background:#fff;color:#000;}
+  section{break-inside:avoid;}
+}
+</style>
+</head>
+<body data-payload-hash="{{PAYLOAD_HASH}}">
+<header class="page">
+  <h1>{{TITLE}}</h1><span class="badge {{MODE}}">{{MODE_LABEL}}</span>
+  <p class="verdict">{{VERDICT}}</p>
+  <p class="diffref">diff: <code>{{DIFF}}</code></p>
+</header>
+<nav id="toc">{{TOC}}</nav>
+<main>
+{{SECTIONS}}
+</main>
+<footer id="composer">
+  <span id="tally">No responses yet</span>
+  <button id="copy-prompt" type="button">Copy as prompt</button>
+</footer>
+{{MERMAID}}
+<script>
+(function(){
+  "use strict";
+  window.addEventListener("beforeprint", function () {
+    document.querySelectorAll("details").forEach(function (d) { d.open = true; });
+  });
+
+  var HASH = document.body.dataset.payloadHash;
+  var KEY = "explain-diff:" + HASH;
+  var CHOICES = ["Approve", "Discuss", "Change"];
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { state = {}; }
+
+  function save() { localStorage.setItem(KEY, JSON.stringify(state)); tally(); }
+
+  function tally() {
+    var n = Object.keys(state).filter(function (k) { return state[k].choice || state[k].note; }).length;
+    var total = document.querySelectorAll("[data-card-id]").length;
+    document.getElementById("tally").textContent = n + " of " + total + " responded";
+  }
+
+  document.querySelectorAll("[data-card-id]").forEach(function (card) {
+    var id = card.dataset.cardId;
+    var box = card.querySelector(".respond");
+    state[id] = state[id] || {};
+    CHOICES.forEach(function (choice) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = choice;
+      if (state[id].choice === choice) b.classList.add("active");
+      b.addEventListener("click", function () {
+        state[id].choice = state[id].choice === choice ? null : choice;
+        box.querySelectorAll("button").forEach(function (x) {
+          x.classList.toggle("active", x.textContent === state[id].choice);
+        });
+        save();
+      });
+      box.appendChild(b);
+    });
+    var note = document.createElement("textarea");
+    note.rows = 1;
+    note.placeholder = "Optional note";
+    note.value = state[id].note || "";
+    note.addEventListener("input", function () { state[id].note = note.value; save(); });
+    box.appendChild(note);
+  });
+  tally();
+
+  document.getElementById("copy-prompt").addEventListener("click", function () {
+    var lines = ["Re: \"" + document.title + "\" (explain-diff guide, payload " + HASH + ")"];
+    document.querySelectorAll("[data-card-id]").forEach(function (card) {
+      var id = card.dataset.cardId;
+      var s = state[id] || {};
+      if (!s.choice && !s.note) return;
+      var label = card.dataset.cardTitle || id;
+      var line = "- " + id + " (" + label + "): " + (s.choice || "note").toUpperCase();
+      if (s.note) line += " - " + s.note;
+      lines.push(line);
+    });
+    if (lines.length === 1) lines.push("(no responses recorded)");
+    var text = lines.join("\n");
+    navigator.clipboard.writeText(text).then(function () {
+      var b = document.getElementById("copy-prompt");
+      b.textContent = "Copied";
+      setTimeout(function () { b.textContent = "Copy as prompt"; }, 1500);
+    });
+  });
+
+  function wireDiagrams() {
+    document.querySelectorAll(".mermaid-wrap").forEach(function (wrap) {
+      var links = {};
+      try { links = JSON.parse(wrap.dataset.links || "{}"); } catch (e) { links = {}; }
+      var svg = wrap.querySelector("svg");
+      if (!svg) return;
+      Object.keys(links).forEach(function (label) {
+        svg.querySelectorAll("g.node").forEach(function (node) {
+          var hit = (node.id && node.id.indexOf("-" + label + "-") !== -1) ||
+                    node.textContent.trim() === label;
+          if (hit) {
+            node.classList.add("linked");
+            node.dataset.anchor = links[label];
+            node.addEventListener("click", function () { location.hash = links[label]; });
+          }
+        });
+      });
+      panZoom(svg);
+    });
+    document.querySelectorAll("[data-card-id]").forEach(function (card) {
+      card.addEventListener("mouseenter", function () { crossHl(card.dataset.cardId, true); });
+      card.addEventListener("mouseleave", function () { crossHl(card.dataset.cardId, false); });
+    });
+  }
+
+  function crossHl(id, on) {
+    document.querySelectorAll('g.node[data-anchor="#' + id + '"]').forEach(function (n) {
+      n.classList.toggle("hl", on);
+    });
+  }
+
+  function panZoom(svg) {
+    var vb = svg.viewBox.baseVal;
+    if (!vb || !vb.width) return;
+    var drag = null;
+    svg.addEventListener("wheel", function (e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var k = e.deltaY < 0 ? 0.9 : 1.1;
+      vb.width *= k; vb.height *= k;
+    }, { passive: false });
+    svg.addEventListener("pointerdown", function (e) {
+      drag = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y };
+      svg.setPointerCapture(e.pointerId);
+    });
+    svg.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var s = vb.width / svg.clientWidth;
+      vb.x = drag.vx - (e.clientX - drag.x) * s;
+      vb.y = drag.vy - (e.clientY - drag.y) * s;
+    });
+    svg.addEventListener("pointerup", function () { drag = null; });
+  }
+
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
+    });
+    mermaid.run({ querySelector: ".mermaid" }).then(wireDiagrams, wireDiagrams);
+  }
+})();
+</script>
+</body>
+</html>
