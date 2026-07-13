@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html as html_mod
 import json
 import subprocess
 import sys
@@ -23,6 +24,8 @@ from pygments.util import ClassNotFound
 
 SKILL_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = SKILL_DIR / "schema.json"
+TEMPLATE_PATH = SKILL_DIR / "assets" / "template.html"
+MERMAID_PATH = SKILL_DIR / "assets" / "mermaid.min.js"
 
 
 class PayloadError(Exception):
@@ -181,8 +184,98 @@ def render_md(payload: dict) -> str:
     return "\n".join(out)
 
 
+def _esc(text: str) -> str:
+    return html_mod.escape(text, quote=True)
+
+
+def _payload_hash(payload: dict) -> str:
+    def clean(obj):
+        if isinstance(obj, dict):
+            return {k: clean(v) for k, v in sorted(obj.items()) if not k.startswith("_")}
+        if isinstance(obj, list):
+            return [clean(v) for v in obj]
+        return obj
+    canonical = json.dumps(clean(payload), sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def _section_html(s: dict, anchor: str) -> str:
+    t = s["type"]
+    if t == "narrative":
+        return (f'<section class="narrative" id="{anchor}"><h2>{_esc(s["heading"])}</h2>'
+                f'{md_to_html(s["md"])}</section>')
+    if t == "diagram":
+        links = _esc(json.dumps(s.get("links", {})))
+        return (f'<section class="diagram" id="{anchor}"><h2>{_esc(s["heading"])}</h2>'
+                f'<div class="mermaid-wrap" data-links="{links}">'
+                f'<pre class="mermaid">{_esc(s["mermaid"])}</pre></div></section>')
+    if t == "decision":
+        alts = ""
+        if s.get("alternatives"):
+            items = "".join(f"<li>{_esc(a)}</li>" for a in s["alternatives"])
+            alts = f'<div class="alts"><h4>Alternatives considered</h4><ul>{items}</ul></div>'
+        return (f'<section class="card decision rc-{s["reversal_cost"]}" id="{s["id"]}" '
+                f'data-card-id="{s["id"]}" data-card-title="{_esc(s["title"])}">'
+                f'<h3>{_esc(s["title"])}</h3>'
+                f'<span class="tags">{s["provenance"]} - reversal cost: {s["reversal_cost"]}</span>'
+                f'{md_to_html(s["md"])}{alts}<div class="respond"></div></section>')
+    if t == "hunk":
+        return (f'<section class="hunk" id="{anchor}">'
+                f'<div class="hunk-meta"><code>{_esc(s["file"])}:{s["lines"]} @ {_esc(s["ref"])}</code>'
+                f' <span data-sha="{s["_sha256"]}"></span></div>'
+                f'<div class="hunk-body"><div class="annotation">{md_to_html(s["md"])}</div>'
+                f'<div class="code"><pre class="raw" style="display:none">{_esc(s["_code"])}</pre>{highlight_code(s["_code"], s["file"])}</div></div></section>')
+    if t == "comparison":
+        return (f'<section id="{anchor}"><h2>{_esc(s["heading"])}</h2><div class="comparison">'
+                f'<div><h4>Before</h4>{md_to_html(s["before_md"])}</div>'
+                f'<div><h4>After</h4>{md_to_html(s["after_md"])}</div></div></section>')
+    if t == "question":
+        return (f'<section class="card question" id="{s["id"]}" data-card-id="{s["id"]}" '
+                f'data-card-title="open question"><h3>Open question</h3>'
+                f'{md_to_html(s["md"])}<div class="respond"></div></section>')
+    if t == "fallout":
+        items = "".join(f"<li>{_esc(i)}</li>" for i in s["items"])
+        heading = _esc(s.get("heading", "Mechanical fallout"))
+        return (f'<section id="{anchor}"><details class="fallout">'
+                f'<summary>{heading} ({len(s["items"])} items)</summary><ul>{items}</ul>'
+                f'</details></section>')
+    raise PayloadError(f"unknown section type: {t}")
+
+
 def render_html(payload: dict) -> str:
-    raise PayloadError("html renderer not built yet")
+    sections_html, toc = [], []
+    for i, s in enumerate(payload["sections"], 1):
+        anchor = s.get("id", f"s{i}")
+        sections_html.append(_section_html(s, anchor))
+        label = s.get("heading") or s.get("title") or s.get("id") or s["type"]
+        if s["type"] != "fallout":
+            toc.append(f'<a href="#{anchor}">{_esc(label)}</a>')
+
+    has_diagram = any(s["type"] == "diagram" for s in payload["sections"])
+    mermaid_tag = ""
+    if has_diagram:
+        if not MERMAID_PATH.is_file():
+            raise PayloadError(
+                f"payload has diagrams but {MERMAID_PATH} is missing; "
+                "vendor mermaid.min.js into assets/"
+            )
+        mermaid_tag = f"<script>{MERMAID_PATH.read_text()}</script>"
+
+    page = TEMPLATE_PATH.read_text()
+    for token, value in {
+        "{{TITLE}}": _esc(payload["title"]),
+        "{{VERDICT}}": _esc(payload["verdict"]),
+        "{{MODE}}": payload["mode"],
+        "{{MODE_LABEL}}": MODE_LABELS[payload["mode"]],
+        "{{DIFF}}": _esc(payload["diff"]),
+        "{{TOC}}": " ".join(toc),
+        "{{SECTIONS}}": "\n".join(sections_html),
+        "{{PYGMENTS_CSS}}": HtmlFormatter(cssclass="highlight").get_style_defs(".highlight"),
+        "{{PAYLOAD_HASH}}": _payload_hash(payload),
+        "{{MERMAID}}": mermaid_tag,
+    }.items():
+        page = page.replace(token, value)
+    return page
 
 
 def main(argv: list[str] | None = None) -> int:
