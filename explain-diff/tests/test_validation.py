@@ -56,5 +56,10 @@ def test_dangling_diagram_link_rejected(tmp_path):
 def test_unknown_section_type_rejected(tmp_path):
     bad = minimal_payload()
     bad["sections"].append({"type": "sparkles", "md": "x"})
-    with pytest.raises(PayloadError):
+    with pytest.raises(PayloadError, match="section types"):
         load_payload(write(tmp_path, bad))
+
+
+def test_missing_payload_file_rejected(tmp_path):
+    with pytest.raises(PayloadError, match="nope.json"):
+        load_payload(tmp_path / "nope.json")

@@ -21,15 +21,24 @@ class PayloadError(Exception):
 
 def load_payload(path: Path) -> dict:
     try:
-        payload = json.loads(path.read_text())
+        text = path.read_text()
+    except OSError as e:
+        raise PayloadError(f"cannot read payload file {path}: {e}") from e
+    try:
+        payload = json.loads(text)
     except json.JSONDecodeError as e:
         raise PayloadError(f"{path} is not valid JSON: {e}") from e
     schema = json.loads(SCHEMA_PATH.read_text())
     try:
         jsonschema.validate(payload, schema)
     except jsonschema.ValidationError as e:
-        loc = "/".join(str(p) for p in e.absolute_path) or "top level"
-        raise PayloadError(f"schema violation at {loc}: {e.message}") from e
+        err = jsonschema.exceptions.best_match([e]) or e
+        loc = "/".join(str(p) for p in err.absolute_path) or "top level"
+        msg = f"schema violation at {loc}: {err.message}"
+        if e.validator == "oneOf":
+            msg += (" (section types: narrative, diagram, decision, hunk, "
+                    "comparison, question, fallout)")
+        raise PayloadError(msg) from e
 
     ids = [s["id"] for s in payload["sections"] if s["type"] in ("decision", "question")]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
