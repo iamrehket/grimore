@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 
 from render import SKILL_DIR, main
 
@@ -13,8 +12,9 @@ def test_example_renders_self_contained_html(tmp_path):
     html = out.read_text()
     # No external-fetch vectors. Plain "https://" strings inside the vendored
     # mermaid bundle are fine; what matters is nothing is loaded from the network.
-    for vector in ("<script src=", "<link ", "url(http", "@import url"):
+    for vector in ("<script src=", "<link ", "url(http"):
         assert vector not in html, f"external-fetch vector found: {vector}"
+    assert not re.search(r"@import\s", html), "external-fetch vector found: @import"
     assert not re.search(r"\{\{[A-Z_]+\}\}", html)
     assert "Copy as prompt" in html
     assert "mermaid" in html.lower()
