@@ -41,9 +41,10 @@ def test_self_contained(repo, fake_mermaid):
 
 def test_core_content_present(repo, fake_mermaid):
     html = rendered(repo)
+    text = re.sub(r"<[^>]+>", "", html)
     assert "Retry queue" in html and "at-least-once" in html.lower()
     assert 'id="d1"' in html and 'id="q1"' in html
-    assert "line 3" in html                      # extracted hunk code
+    assert "line 3" in text                      # extracted hunk code, as rendered text
     assert "fake mermaid runtime" in html        # inlined because diagram present
     assert 'data-links=' in html                 # diagram interactivity hooks
     assert "Copy as prompt" in html              # composer

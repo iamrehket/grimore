@@ -224,7 +224,7 @@ def _section_html(s: dict, anchor: str) -> str:
                 f'<div class="hunk-meta"><code>{_esc(s["file"])}:{s["lines"]} @ {_esc(s["ref"])}</code>'
                 f' <span data-sha="{s["_sha256"]}"></span></div>'
                 f'<div class="hunk-body"><div class="annotation">{md_to_html(s["md"])}</div>'
-                f'<div class="code"><pre class="raw" style="display:none">{_esc(s["_code"])}</pre>{highlight_code(s["_code"], s["file"])}</div></div></section>')
+                f'<div class="code">{highlight_code(s["_code"], s["file"])}</div></div></section>')
     if t == "comparison":
         return (f'<section id="{anchor}"><h2>{_esc(s["heading"])}</h2><div class="comparison">'
                 f'<div><h4>Before</h4>{md_to_html(s["before_md"])}</div>'
