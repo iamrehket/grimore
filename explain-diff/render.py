@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import html as html_mod
 import json
+import re
 import subprocess
 import sys
 import webbrowser
@@ -73,6 +74,9 @@ def extract_hunk(hunk: dict, repo_root: Path) -> tuple[str, str]:
     where = f"{hunk['file']}:{hunk['lines']} @ {hunk['ref']}"
     if start < 1 or end < start:
         raise PayloadError(f"{where}: invalid line range (need 1 <= start <= end)")
+    rel = Path(hunk["file"])
+    if rel.is_absolute() or ".." in rel.parts:
+        raise PayloadError(f"{where}: file must be a relative path inside the repo")
     if hunk["ref"] == "WORKTREE":
         target = repo_root / hunk["file"]
         if not target.is_file():
@@ -122,10 +126,16 @@ def write_hashes(payload: dict, path: Path) -> None:
 
 
 MERMAID_TYPES = (
-    "flowchart", "graph", "sequenceDiagram", "stateDiagram", "stateDiagram-v2",
+    "flowchart", "graph", "gitGraph", "sequenceDiagram", "stateDiagram", "stateDiagram-v2",
     "classDiagram", "erDiagram", "gantt", "pie", "mindmap", "timeline", "journey",
 )
-_MD = MarkdownIt("commonmark").enable("table")
+_MD = MarkdownIt("commonmark", options_update={"html": False}).enable("table")
+# Belt-and-suspenders: MarkdownIt with html=False already refuses to parse raw
+# HTML as markup (it falls back to escaped text), but the literal tag source
+# - including attribute names like `onerror` - still survives as inert text.
+# Strip anything that looks like an HTML tag/comment/declaration before the
+# markdown pass so no author-supplied markup fragments reach the page at all.
+_RAW_HTML_RE = re.compile(r"<!--.*?-->|<[!?/]?[A-Za-z][^>]*>", re.DOTALL)
 
 
 def check_mermaid(src: str) -> None:
@@ -138,7 +148,7 @@ def check_mermaid(src: str) -> None:
 
 
 def md_to_html(text: str) -> str:
-    return _MD.render(text)
+    return _MD.render(_RAW_HTML_RE.sub("", text))
 
 
 def highlight_code(code: str, filename: str) -> str:
@@ -191,7 +201,7 @@ def _esc(text: str) -> str:
 def _payload_hash(payload: dict) -> str:
     def clean(obj):
         if isinstance(obj, dict):
-            return {k: clean(v) for k, v in sorted(obj.items()) if not k.startswith("_")}
+            return {k: clean(v) for k, v in sorted(obj.items()) if not (k.startswith("_") or k == "sha256")}
         if isinstance(obj, list):
             return [clean(v) for v in obj]
         return obj
@@ -292,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         for w in resolve_hunks(payload, args.repo.resolve()):
             print(f"WARNING: {w}", file=sys.stderr)
         rendered = render_html(payload) if args.format == "html" else render_md(payload)
-        if args.write_hashes:
+        if args.write_hashes and any(s["type"] == "hunk" for s in payload["sections"]):
             write_hashes(payload, args.payload)
     except PayloadError as e:
         print(f"error: {e}", file=sys.stderr)

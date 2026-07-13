@@ -61,6 +61,13 @@ def test_resolve_warns_on_drift(repo):
     assert h["_code"].startswith("line 3")
 
 
+def test_absolute_or_traversal_path_raises(repo):
+    for bad in ("/etc/passwd", "../outside.py"):
+        h = hunk("WORKTREE") | {"file": bad}
+        with pytest.raises(PayloadError, match="relative"):
+            extract_hunk(h, repo)
+
+
 def test_write_hashes_round_trip(repo, tmp_path):
     payload = {"sections": [hunk("WORKTREE")]}
     resolve_hunks(payload, repo)

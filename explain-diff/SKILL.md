@@ -79,7 +79,8 @@ Rules:
 - Ids are lowercase (`d1`, `q1`, ...) and unique; diagram `links` must target them.
 - No emojis anywhere in the payload.
 - When the payload has `hunk` sections, pass `--write-hashes` on first render
-  so later re-renders detect drift (it is a no-op without hunks).
+  so later re-renders detect drift (rewrites the payload file in place to add
+  per-hunk sha256 fields; skipped entirely when the payload has no hunks).
 - Line numbers in `hunk` refer to the file at `ref` (for WORKTREE: as on disk
   now). Verify with `sed -n 'START,ENDp' file` before authoring.
 

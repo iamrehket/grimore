@@ -6,6 +6,7 @@ from render import PayloadError, check_mermaid, highlight_code, md_to_html
 def test_known_mermaid_type_passes():
     check_mermaid("flowchart LR\n  A --> B")
     check_mermaid("\n  sequenceDiagram\n  A->>B: hi")
+    check_mermaid("gitGraph\n  commit")
 
 
 def test_unknown_mermaid_type_rejected():

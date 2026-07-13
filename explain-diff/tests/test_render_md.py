@@ -82,3 +82,14 @@ def test_write_hashes_skipped_on_render_failure(repo, tmp_path, monkeypatch):
     rc = main([str(p), "--format", "md", "--repo", str(repo), "--write-hashes"])
     assert rc == 1
     assert p.read_text() == before
+
+
+def test_write_hashes_noop_without_hunks(repo, tmp_path):
+    data = full_payload()
+    data["sections"] = [s for s in data["sections"] if s["type"] != "hunk"]
+    p = tmp_path / "payload.json"
+    p.write_text(json.dumps(data))
+    before = p.read_text()
+    rc = main([str(p), "--format", "md", "--repo", str(repo), "--out", str(tmp_path / "g.md"), "--write-hashes"])
+    assert rc == 0
+    assert p.read_text() == before

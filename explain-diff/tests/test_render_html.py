@@ -62,3 +62,23 @@ def test_mermaid_omitted_without_diagrams(repo, fake_mermaid):
 def test_no_emojis(repo, fake_mermaid):
     html = rendered(repo)
     assert not any(0x1F300 <= ord(c) <= 0x1FAFF or 0x2600 <= ord(c) <= 0x27BF for c in html)
+
+
+def test_user_html_is_escaped(repo, fake_mermaid):
+    payload = full_payload()
+    payload["title"] = "T <b>bold</b>"
+    payload["sections"][0]["md"] = "evil <script>alert(1)</script> and <img src=x onerror=y>"
+    resolve_hunks(payload, repo)
+    html = render_html(payload)
+    assert "<script>alert(1)</script>" not in html
+    assert "onerror" not in html
+    assert "T &lt;b&gt;bold&lt;/b&gt;" in html
+
+
+def test_payload_hash_stable_across_write_hashes(repo):
+    from render import _payload_hash
+    payload = full_payload()
+    resolve_hunks(payload, repo)
+    h1 = _payload_hash(payload)
+    payload["sections"][3]["sha256"] = payload["sections"][3]["_sha256"]
+    assert _payload_hash(payload) == h1

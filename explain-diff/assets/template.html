@@ -168,7 +168,7 @@ footer#composer button{font:inherit;font-size:.85rem;padding:.35rem 1rem;border-
       Object.keys(links).forEach(function (label) {
         svg.querySelectorAll("g.node").forEach(function (node) {
           var hit = (node.id && node.id.indexOf("-" + label + "-") !== -1) ||
-                    node.textContent.trim().indexOf(label) !== -1;
+                    node.textContent.trim() === label;
           if (hit) {
             node.classList.add("linked");
             node.dataset.anchor = links[label];
@@ -218,7 +218,7 @@ footer#composer button{font:inherit;font-size:.85rem;padding:.35rem 1rem;border-
       startOnLoad: false,
       theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
     });
-    mermaid.run({ querySelector: ".mermaid" }).then(wireDiagrams);
+    mermaid.run({ querySelector: ".mermaid" }).then(wireDiagrams, wireDiagrams);
   }
 })();
 </script>
