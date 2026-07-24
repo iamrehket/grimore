@@ -295,3 +295,77 @@ def check_edges(store: Store) -> list[Finding]:
                 )
             )
     return out
+
+
+def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=cfg.root, capture_output=True, text=True
+    )
+
+
+def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
+    out: list[Finding] = []
+    if not cfg.components.is_dir():
+        return out
+    top = _git(cfg, "rev-parse", "--show-toplevel")
+    mb = _git(cfg, "merge-base", "HEAD", cfg.default_branch)
+    if top.returncode != 0 or mb.returncode != 0:
+        if strict:
+            return [
+                error(
+                    "E042",
+                    ".",
+                    f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                    "failing closed (fix CI: fetch-depth: 0)",
+                )
+            ]
+        return [
+            warning(
+                "W042",
+                ".",
+                f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                "skipping transition check",
+            )
+        ]
+    git_root = Path(top.stdout.strip()).resolve()
+    base = mb.stdout.strip()
+    comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
+    ls = _git(cfg, "ls-tree", "-r", "--name-only", base, "--", comp_prefix)
+    old_paths = set(ls.stdout.split())
+    by_git_rel = {
+        c.path.resolve().relative_to(git_root).as_posix(): c for c in store.components
+    }
+    for old in sorted(old_paths):
+        if old.endswith(".md") and old not in by_git_rel:
+            out.append(error("E041", old, "component deleted; components are never deleted"))
+    for git_rel, c in sorted(by_git_rel.items()):
+        if git_rel not in old_paths:
+            continue  # new on this branch; any initial status is legal
+        show = _git(cfg, "show", f"{base}:{git_rel}")
+        old_status = None
+        if show.returncode == 0:
+            m = FM_RE.match(show.stdout)
+            if m:
+                try:
+                    old_fm = yaml.safe_load(m.group(1))
+                except yaml.YAMLError:
+                    old_fm = None
+                if isinstance(old_fm, dict):
+                    old_status = old_fm.get("status")
+        if old_status is None:
+            out.append(
+                warning("W043", c.rel, "could not read status at merge-base; transition skipped", c.cid)
+            )
+            continue
+        new_status = c.status
+        if new_status == old_status or (old_status, new_status) in LEGAL_TRANSITIONS:
+            continue
+        out.append(
+            error(
+                "E040",
+                c.rel,
+                f"illegal status transition {old_status!r} -> {new_status!r} since merge-base",
+                c.cid,
+            )
+        )
+    return out
