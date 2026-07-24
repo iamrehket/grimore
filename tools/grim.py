@@ -499,3 +499,85 @@ def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
             c.path.write_text(new_text, encoding="utf-8")
             fixed.append(c.rel)
     return fixed
+
+
+@dataclasses.dataclass
+class LintResult:
+    findings: list[Finding]
+    fixed: list[str]
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "error"]
+
+    @property
+    def warnings(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "warning"]
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if self.errors else 0
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "ok": not self.errors,
+                "errors": [dataclasses.asdict(f) for f in self.errors],
+                "warnings": [dataclasses.asdict(f) for f in self.warnings],
+                "fixed": self.fixed,
+            },
+            indent=2,
+        )
+
+
+def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResult:
+    root = root.resolve()
+    cfg = load_config(root)
+    store = load_store(cfg)
+    findings = list(store.findings)
+    findings += check_schema(store, cfg)
+    findings += check_ids(store)
+    findings += check_edges(store)
+    findings += check_transitions(store, cfg, strict)
+    findings += check_avoid_terms(store)
+    findings += check_plans(cfg)
+    fixed = apply_fixes(store, findings) if fix else []
+    return LintResult(findings=findings, fixed=fixed)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="grim", description="doc-components tooling")
+    sub = parser.add_subparsers(dest="verb", required=True)
+    lint_p = sub.add_parser("lint", help="validate the component store")
+    lint_p.add_argument("--fix", action="store_true", help="normalize component formatting")
+    lint_p.add_argument(
+        "--strict", action="store_true",
+        help="fail closed when the merge-base is unresolvable (CI mode)",
+    )
+    lint_p.add_argument("--json", action="store_true", help="machine-readable output")
+    lint_p.add_argument(
+        "--root", type=Path, default=Path.cwd(), help="project root (default: cwd)"
+    )
+    args = parser.parse_args(argv)
+    try:
+        result = run_lint(args.root, fix=args.fix, strict=args.strict)
+    except ConfigError as exc:
+        print(f"grim: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(result.to_json())
+    else:
+        for f in result.findings:
+            location = f.path + (f" [{f.component}]" if f.component else "")
+            print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+        for rel in result.fixed:
+            print(f"FIXED {rel}")
+        summary = f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)"
+        if result.fixed:
+            summary += f", {len(result.fixed)} file(s) fixed"
+        print(summary)
+    return result.exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
