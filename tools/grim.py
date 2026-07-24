@@ -148,3 +148,104 @@ def parse_component(path: Path, root: Path) -> tuple[Component | None, list[Find
         Component(path=path, rel=rel, dir_type=path.parent.name, fm=fm, body=m.group(2)),
         [],
     )
+
+
+@dataclasses.dataclass
+class Store:
+    components: list[Component]
+    findings: list[Finding]
+
+
+def load_store(cfg: Config) -> Store:
+    components: list[Component] = []
+    findings: list[Finding] = []
+    if not cfg.components.is_dir():
+        return Store(components, findings)
+    for path in sorted(cfg.components.rglob("*.md")):
+        rel = path.relative_to(cfg.root).as_posix()
+        parent = path.parent
+        if parent == cfg.components or parent.parent != cfg.components:
+            findings.append(
+                error("E004", rel, "component files must live at <components>/<type>/<slug>.md")
+            )
+            continue
+        if parent.name not in cfg.types:
+            findings.append(
+                error("E005", rel, f"unknown component type directory {parent.name!r}")
+            )
+            continue
+        comp, errs = parse_component(path, cfg.root)
+        findings.extend(errs)
+        if comp is not None:
+            components.append(comp)
+    return Store(components, findings)
+
+
+def _valid_date(value: str) -> bool:
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def check_schema(store: Store, cfg: Config) -> list[Finding]:
+    out: list[Finding] = []
+    for c in store.components:
+        rel, fm = c.rel, c.fm
+        for key in fm:
+            if key not in FIELD_ORDER:
+                out.append(error("E011", rel, f"unknown frontmatter field {key!r}", c.cid))
+        missing = [k for k in REQUIRED_FIELDS if k not in fm]
+        if missing:
+            out.append(
+                error("E010", rel, f"missing required fields: {', '.join(missing)}", c.cid)
+            )
+            continue
+        ctype, status, cid, date = fm["type"], fm["status"], fm["id"], fm["date"]
+        if ctype not in cfg.types:
+            out.append(
+                error("E012", rel, f"type must be one of {list(cfg.types)}, got {ctype!r}", cid)
+            )
+        elif ctype != c.dir_type:
+            out.append(
+                error("E013", rel, f"type {ctype!r} does not match directory {c.dir_type!r}", cid)
+            )
+        if status not in STATUSES:
+            out.append(
+                error("E014", rel, f"status must be one of {list(STATUSES)}, got {status!r}", cid)
+            )
+        slug = c.path.stem
+        if not SLUG_RE.fullmatch(slug):
+            out.append(
+                error("E015", rel, f"filename slug {slug!r} must match [a-z0-9][a-z0-9-]*", cid)
+            )
+        if isinstance(ctype, str):
+            expected = f"{ctype}-{slug}"
+            if cid != expected:
+                out.append(
+                    error("E016", rel, f"id must be {expected!r} (type + filename slug), got {cid!r}", cid)
+                )
+        if not (isinstance(date, str) and DATE_RE.fullmatch(date) and _valid_date(date)):
+            out.append(
+                error("E017", rel, f"date must be a valid ISO YYYY-MM-DD date, got {date!r}", cid)
+            )
+        if "paths" in fm and ctype not in PATHS_TYPES:
+            out.append(error("E018", rel, "paths: is only allowed on note and adr components", cid))
+        if "supersedes" in fm and not (
+            isinstance(fm["supersedes"], list)
+            and all(isinstance(x, str) for x in fm["supersedes"])
+        ):
+            out.append(error("E019", rel, "supersedes must be a list of component IDs", cid))
+        if "paths" in fm and not (
+            isinstance(fm["paths"], list) and all(isinstance(x, str) for x in fm["paths"])
+        ):
+            out.append(error("E019", rel, "paths must be a list of glob strings", cid))
+        if "subsystem" in fm:
+            if not isinstance(fm["subsystem"], str):
+                out.append(error("E019", rel, "subsystem must be a string", cid))
+            elif ctype != "note":
+                out.append(
+                    warning("W061", rel, "subsystem has no effect on non-note components", cid)
+                )
+    return out
