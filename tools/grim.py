@@ -249,3 +249,49 @@ def check_schema(store: Store, cfg: Config) -> list[Finding]:
                     warning("W061", rel, "subsystem has no effect on non-note components", cid)
                 )
     return out
+
+
+def check_ids(store: Store) -> list[Finding]:
+    out: list[Finding] = []
+    seen: dict[str, str] = {}
+    for c in store.components:
+        cid = c.cid
+        if not isinstance(cid, str):
+            continue
+        if cid in seen:
+            out.append(error("E020", c.rel, f"duplicate id {cid!r} (also in {seen[cid]})", cid))
+        else:
+            seen[cid] = c.rel
+    return out
+
+
+def check_edges(store: Store) -> list[Finding]:
+    out: list[Finding] = []
+    ids = {c.cid for c in store.components if isinstance(c.cid, str)}
+    rel_by_id = {c.cid: c.rel for c in store.components if isinstance(c.cid, str)}
+    live_successors: dict[str, list[str]] = {}
+    for c in store.components:
+        for target in c.supersedes:
+            if not isinstance(target, str):
+                continue  # E019 already reported by check_schema
+            if target == c.cid:
+                out.append(error("E030", c.rel, "component supersedes itself", c.cid))
+                continue
+            if target not in ids:
+                out.append(
+                    error("E030", c.rel, f"supersedes target {target!r} does not exist in the store", c.cid)
+                )
+                continue
+            if c.status == "current":
+                live_successors.setdefault(target, []).append(c.cid)
+    for target, succs in sorted(live_successors.items()):
+        if len(succs) >= 2:
+            out.append(
+                error(
+                    "E031",
+                    rel_by_id.get(target, "."),
+                    f"{target!r} has {len(succs)} live successors ({', '.join(sorted(succs))}); reconcile which stands",
+                    target,
+                )
+            )
+    return out
