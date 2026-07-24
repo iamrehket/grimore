@@ -105,3 +105,12 @@ def test_no_repo_strict_is_e042(tmp_path):
 
 def test_empty_store_skips_git_entirely(tmp_path):
     assert transitions(tmp_path, strict=True) == []
+
+
+def test_broken_but_present_component_is_not_deleted(tmp_path):
+    make_repo(tmp_path)
+    d = tmp_path / "docs" / "components" / "adr"
+    d.mkdir(parents=True)
+    (d / "broken.md").write_text("---\nstatus: [unterminated\n", encoding="utf-8")
+    commit_all(tmp_path, "add broken component")
+    assert transitions(tmp_path) == []

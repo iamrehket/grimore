@@ -331,12 +331,33 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
     base = mb.stdout.strip()
     comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
     ls = _git(cfg, "ls-tree", "-r", "--name-only", base, "--", comp_prefix)
-    old_paths = set(ls.stdout.split())
+    if ls.returncode != 0:
+        if strict:
+            return [
+                error(
+                    "E042",
+                    ".",
+                    "cannot list components at merge-base; "
+                    "failing closed (fix CI: fetch-depth: 0)",
+                )
+            ]
+        return [
+            warning(
+                "W042",
+                ".",
+                "cannot list components at merge-base; skipping transition check",
+            )
+        ]
+    old_paths = set(ls.stdout.splitlines())
+    present_paths = {
+        p.resolve().relative_to(git_root).as_posix()
+        for p in cfg.components.rglob("*.md")
+    }
     by_git_rel = {
         c.path.resolve().relative_to(git_root).as_posix(): c for c in store.components
     }
     for old in sorted(old_paths):
-        if old.endswith(".md") and old not in by_git_rel:
+        if old.endswith(".md") and old not in present_paths:
             out.append(error("E041", old, "component deleted; components are never deleted"))
     for git_rel, c in sorted(by_git_rel.items()):
         if git_rel not in old_paths:
