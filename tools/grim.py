@@ -451,3 +451,32 @@ def check_plans(cfg: Config) -> list[Finding]:
         if not has_spec:
             out.append(warning("W060", rel, "plan is missing spec: frontmatter"))
     return out
+
+
+def _format_fm_value(value) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(str(v) for v in value) + "]"
+    return str(value)
+
+
+def normalize_component(c: Component) -> str:
+    lines = ["---"]
+    for key in FIELD_ORDER:
+        if key in c.fm:
+            lines.append(f"{key}: {_format_fm_value(c.fm[key])}")
+    lines.append("---")
+    body = c.body.strip("\n")
+    return "\n".join(lines) + "\n\n" + body + "\n"
+
+
+def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
+    fixed: list[str] = []
+    error_rels = {f.path for f in findings if f.level == "error"}
+    for c in store.components:
+        if c.rel in error_rels:
+            continue
+        new_text = normalize_component(c)
+        if new_text != c.path.read_text(encoding="utf-8"):
+            c.path.write_text(new_text, encoding="utf-8")
+            fixed.append(c.rel)
+    return fixed
