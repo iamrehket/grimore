@@ -428,3 +428,26 @@ def check_avoid_terms(store: Store) -> list[Finding]:
                         )
                     )
     return out
+
+
+def check_plans(cfg: Config) -> list[Finding]:
+    out: list[Finding] = []
+    if not cfg.plans.is_dir():
+        return out
+    for path in sorted(cfg.plans.rglob("*.md")):
+        rel = path.relative_to(cfg.root).as_posix()
+        m = FM_RE.match(path.read_text(encoding="utf-8"))
+        has_spec = False
+        if m:
+            try:
+                fm = yaml.safe_load(m.group(1))
+            except yaml.YAMLError:
+                fm = None
+            has_spec = (
+                isinstance(fm, dict)
+                and isinstance(fm.get("spec"), str)
+                and bool(fm["spec"].strip())
+            )
+        if not has_spec:
+            out.append(warning("W060", rel, "plan is missing spec: frontmatter"))
+    return out
