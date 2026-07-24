@@ -30,13 +30,15 @@ Defaults; an adopting project overrides paths in `.grimore.toml`.
 
 | Field | Required | Rules |
 |---|---|---|
-| `id` | yes | `<type>-<slug>`; slug `[a-z0-9][a-z0-9-]*`; equals filename minus `.md`; unique across the store; never reused |
+| `id` | yes | `<type>-<slug>`; slug `[a-z0-9][a-z0-9-]*` and equals the filename minus `.md`; unique across the store; never reused |
 | `type` | yes | one of `adr`, `term`, `usecase`, `constraint`, `nongoal`, `note`; equals the parent directory name |
 | `status` | yes | `draft`, `current`, or `superseded` |
 | `supersedes` | no | list of component IDs this replaces; every target must exist in the store |
-| `subsystem` | no | routes `note` (and optionally `adr`) into a render target |
+| `subsystem` | no | routes `note` into a render target |
 | `paths` | no | `note`/`adr` only; list of path globs the component describes; drives the touched-path guard |
 | `date` | yes | ISO `YYYY-MM-DD` creation date; never updated |
+
+Frontmatter field order is not significant.
 
 ## Lifecycle
 

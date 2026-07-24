@@ -9,4 +9,5 @@ date: 2026-07-24
 
 One glossary per repository in v1. The bounded-context map pattern
 (multiple per-context glossaries with declared relationships between
-them) is deliberately excluded from v1 and tracked as deferred work.
+them) is deliberately excluded because no adopting project has needed
+it yet; it is tracked as deferred work.

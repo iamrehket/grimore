@@ -2,8 +2,8 @@
 id: note-<slug>
 type: note
 status: draft
-subsystem: <render-target>
-paths: [<globs-this-note-describes>/]
+# subsystem: <render-target>
+# paths: [<globs-this-note-describes>/]
 date: <YYYY-MM-DD>
 ---
 
