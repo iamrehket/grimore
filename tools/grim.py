@@ -82,3 +82,69 @@ def load_config(root: Path) -> Config:
         default_branch=raw.get("default_branch", DEFAULTS["default_branch"]),
         types=types,
     )
+
+
+@dataclasses.dataclass
+class Finding:
+    level: str  # "error" or "warning"
+    code: str
+    path: str  # config-root-relative posix path ("." when store-wide)
+    message: str
+    component: str | None = None
+
+
+def error(code: str, path: str, message: str, component: str | None = None) -> Finding:
+    return Finding("error", code, path, message, component)
+
+
+def warning(code: str, path: str, message: str, component: str | None = None) -> Finding:
+    return Finding("warning", code, path, message, component)
+
+
+@dataclasses.dataclass
+class Component:
+    path: Path  # absolute
+    rel: str  # config-root-relative posix path
+    dir_type: str  # parent directory name
+    fm: dict
+    body: str
+
+    @property
+    def cid(self):
+        return self.fm.get("id")
+
+    @property
+    def ctype(self):
+        return self.fm.get("type")
+
+    @property
+    def status(self):
+        return self.fm.get("status")
+
+    @property
+    def supersedes(self) -> list:
+        value = self.fm.get("supersedes")
+        return value if isinstance(value, list) else []
+
+
+FM_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+
+
+def parse_component(path: Path, root: Path) -> tuple[Component | None, list[Finding]]:
+    rel = path.relative_to(root).as_posix()
+    text = path.read_text(encoding="utf-8")
+    m = FM_RE.match(text)
+    if not m:
+        return None, [error("E001", rel, "missing or unterminated frontmatter block")]
+    try:
+        fm = yaml.safe_load(m.group(1))
+    except yaml.YAMLError as exc:
+        return None, [error("E002", rel, f"invalid YAML frontmatter: {exc}")]
+    if not isinstance(fm, dict):
+        return None, [error("E003", rel, "frontmatter is not a mapping")]
+    if isinstance(fm.get("date"), datetime.date):
+        fm["date"] = fm["date"].isoformat()
+    return (
+        Component(path=path, rel=rel, dir_type=path.parent.name, fm=fm, body=m.group(2)),
+        [],
+    )
