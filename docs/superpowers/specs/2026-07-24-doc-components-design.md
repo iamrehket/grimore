@@ -35,8 +35,10 @@ all of this worse.
 5. **Rendered docs are committed and hash-verified**, paired with a required
    merge discipline (below) so cross-branch invariants are enforced before
    they land, not discovered after.
-6. **v1 validation**: structural lint + format with `--fix`; the
-   code-path staleness tripwire is deferred (but its schema hook ships in v1).
+6. **v1 validation**: structural lint + format with `--fix`, plus a minimal
+   touched-path guard (branch diff vs declared `paths:`, waiver required to
+   bypass). The full staleness tripwire (reporting, path-hygiene tooling) is
+   deferred.
 7. **Plans stay out of the sync loop**: plans are execution scaffolding. They
    participate only via derived status banners.
 
@@ -87,7 +89,7 @@ type: adr               # adr | term | usecase | constraint | nongoal | note
 status: current         # draft | current | superseded
 supersedes: [adr-patch-model]  # optional; see lifecycle rules
 subsystem: renderer     # optional; routes into a render target
-paths: [src/render/]    # optional, note/adr only; hook for later staleness lint
+paths: [src/render/]    # optional, note/adr only; drives the touched-path guard
 date: 2026-07-24        # creation date
 ---
 ```
@@ -117,11 +119,16 @@ IDs anywhere in the store are a lint error.
   `grim check` sees the first branch's landed successor and fails pre-merge.
   `grim check` also runs on the default branch post-merge as a backstop.
 - Transition legality is enforced by construction (only align and finish-docs
-  write statuses) plus a **best-effort git check**: when
-  `git merge-base HEAD <default-branch>` is resolvable, lint compares each
-  component's status against its status at the merge-base and errors on
-  illegal jumps (e.g. `superseded -> current`). When history is unavailable
-  (shallow clone, squash, first commit), the check is skipped, not failed.
+  write statuses) plus a git check: when
+  `git merge-base HEAD <default-branch>` is resolvable, each component's
+  status is compared against its status at the merge-base; illegal jumps
+  (e.g. `superseded -> current`) are errors. **`grim check` fails closed**:
+  an unresolvable merge-base is itself an error, telling the operator to fix
+  CI (`fetch-depth: 0`), not a skip. Local `grim lint` stays best-effort and
+  skips with a warning. (Squash-merging does not break this - the squashed
+  commit lands on the default branch, so the merge-base remains resolvable;
+  the gaps are shallow clones and pre-adoption history, both CI-config
+  matters.)
 
 ### Body formats
 
@@ -157,10 +164,14 @@ Render mapping (fixed in v1):
 Ordering within every output: sort by (`date`, `id`) ascending - deterministic
 and testable (byte-identical render for identical stores).
 
-**Store hash**: sha256 over the sorted list of `(relative path, normalized
-content)` pairs of `status: current` components only. Draft edits do not
-change the hash, so in-flight work does not churn `grim check`. The hash is
-stamped as a single comment line in each rendered file.
+**Render verification**: `grim check` re-renders the store to a temp tree and
+**byte-compares** it against the committed `docs/current/`. This covers every
+input that affects output - components, renderer code, `.grimore.toml`,
+render mapping - with no fingerprint bookkeeping; a renderer or config change
+without a re-render fails check just like a component change would. A store
+hash (sha256 over sorted `(relative path, normalized content)` pairs of
+`status: current` components) is still stamped as a comment line in each
+rendered file, but it is provenance metadata, not the verification mechanism.
 
 Draft and superseded components never appear in any consumer output. History
 lives in the store and git.
@@ -175,8 +186,9 @@ merges see a current view of the store. Adopting projects enable:
    `grim lint --fix && grim render` and commits - one command, mechanical.
    This serializes doc-touching merges; accepted for small teams, revisit if
    it becomes a bottleneck.
-2. **`grim check` in PR CI** - fails on structural violations and stale
-   rendered hash.
+2. **`grim check` in PR CI** - fails on structural violations, rendered
+   output that does not byte-match a fresh render, and unwaived touched-path
+   guard hits. CI must fetch full history (fail-closed transition check).
 3. **`grim check` on the default branch** after merge, as a backstop; a red
    main here means discipline was bypassed, and the fix is
    `grim lint --fix && grim render` on a follow-up commit.
@@ -266,7 +278,11 @@ Zero, one, or many; each discovered spec is processed independently.
 **No-spec branches** (bugfixes, refactors, chores - the common case): steps
 1, 2, and 4 are skipped. The skill asks one question - "did this branch
 change anything a current component describes?" - and either supersedes/adds
-components accordingly or runs step 5 alone. Cheap by design.
+components accordingly or runs step 5 alone. Cheap by design. The self-report
+is backed deterministically by the touched-path guard: a diff that touches a
+component's declared `paths:` without touching the component fails `grim
+check` until a component change or a recorded waiver lands, so a missed
+answer cannot ship silently.
 
 **Idempotency**: specs already stamped `implemented:` are skipped; re-running
 finish-docs on a finished branch reconciles only what remains and is
@@ -307,15 +323,20 @@ via `.grimore.toml`.
 
 - **`grim lint [--fix]`** - frontmatter schema validation; ID uniqueness and
   `<type>-<slug>` format; supersede-edge integrity (targets exist; no
-  dual-live-successor conflicts); best-effort transition check against the
-  merge-base (skipped when history is unavailable); glossary Avoid-term usage
-  in component bodies (word-boundary, case-insensitive, with an inline escape
-  marker); plans missing `spec:`. `--fix`: normalize formatting, rewrite
-  banner blocks on specs and plans. IDs are never renumbered.
+  dual-live-successor conflicts); transition check against the merge-base
+  (best-effort locally, fail-closed under check); **touched-path guard**:
+  branch diff filenames intersected with declared `paths:` globs - a hit
+  requires the component to change in the same branch or a recorded waiver
+  (`Grim-Waive: <component-id> <reason>` commit trailer, echoed in lint
+  output so reviewers see it); glossary Avoid-term usage in component bodies
+  (word-boundary, case-insensitive, with an inline escape marker); plans
+  missing `spec:`. `--fix`: normalize formatting, rewrite banner blocks on
+  specs and plans. IDs are never renumbered.
 - **`grim render`** - compile `docs/current/` per the render mapping; emit
   human exports and digest on request; stamp store hash.
-- **`grim check`** - CI entry point: lint (no fix) + rendered-hash
-  verification. Runs in PR CI and on the default branch (merge discipline).
+- **`grim check`** - CI entry point: lint (no fix, fail-closed) + re-render
+  to a temp tree and byte-compare against committed `docs/current/`. Runs in
+  PR CI and on the default branch (merge discipline).
 
 Exit codes and machine-readable (JSON) output so agents can consume results.
 
@@ -330,9 +351,10 @@ spec and the triage doc become the first status-bannered working-layer docs).
 
 ## Non-goals (v1)
 
-- Code-path staleness tripwire (flagging PRs that touch `paths:` without
-  touching the component). Schema hook ships in v1; the check is a later
-  slice.
+- The full staleness tripwire beyond the v1 touched-path guard: coverage
+  reporting, path-hygiene tooling (detecting stale/renamed `paths:` globs),
+  and any semantic diff-vs-doc comparison. v1 ships the minimal deterministic
+  guard only.
 - `rejected` component status.
 - Multi-context glossaries (Pocock CONTEXT-MAP pattern). One glossary per
   repo in v1.
@@ -346,10 +368,12 @@ spec and the triage doc become the first status-bannered working-layer docs).
 ## Testing
 
 - `grim` is TDD'd with pytest: schema fixtures, lifecycle-transition cases,
-  dual-successor conflict detection, merge-base check degradation, render
-  determinism (byte-identical output for identical stores), store-hash
-  stability under draft edits, hash verification, banner derivation including
-  the abandonment case, Avoid-term word-boundary matching.
+  dual-successor conflict detection, fail-closed vs best-effort merge-base
+  behavior, render determinism (byte-identical output for identical stores),
+  re-render byte-compare (renderer/config change fails check with no
+  component edits), touched-path guard hits and `Grim-Waive` trailer
+  recognition, banner derivation including the abandonment case, Avoid-term
+  word-boundary matching.
 - Skills are pressure-tested per superpowers writing-skills discipline
   (failing scenario first, then the skill text that fixes it), with at least:
   align captures a term and an ADR inline in a scripted session; finish-docs
@@ -369,8 +393,12 @@ spec and the triage doc become the first status-bannered working-layer docs).
   no-paths-in-prose rule, user-invoked skill philosophy).
 - Mentat parallel: live/retired supersede chains; the dual-successor lint is
   mentat's M3 contradiction detection in miniature.
-- Adversarial review 2026-07-24: 17 findings; blockers resolved (slug IDs,
-  transition oracle, merged-state gate), majors incorporated (banner
+- Adversarial review 2026-07-24 (opus): 17 findings; blockers resolved (slug
+  IDs, transition oracle, merged-state gate), majors incorporated (banner
   mechanics, finish-docs discovery/idempotency/bounding, hash definition,
   render mapping), two recommendations consciously declined (uncommitted
   renders, dropping plan banners) - rationale inline above.
+- Adversarial review 2026-07-24 (Codex): 3 findings, all folded in -
+  fail-closed transition check under `grim check`, minimal touched-path
+  guard with `Grim-Waive` trailer pulled into v1, re-render byte-compare
+  replacing hash-only verification.
