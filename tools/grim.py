@@ -453,10 +453,27 @@ def check_plans(cfg: Config) -> list[Finding]:
     return out
 
 
+def _yaml_scalar(value, *, in_flow: bool = False) -> str:
+    """Emit a scalar that YAML re-parses to the same string, quoting only
+    when the plain form would change meaning (e.g. yes -> bool) or break
+    flow-sequence syntax (commas, brackets, braces)."""
+    s = str(value)
+    try:
+        reparsed = yaml.safe_load(s)
+    except yaml.YAMLError:
+        reparsed = object()
+    if isinstance(reparsed, datetime.date):
+        reparsed = reparsed.isoformat()
+    needs_quotes = reparsed != s
+    if in_flow and any(ch in s for ch in ",[]{}"):
+        needs_quotes = True
+    return json.dumps(s) if needs_quotes else s
+
+
 def _format_fm_value(value) -> str:
     if isinstance(value, list):
-        return "[" + ", ".join(str(v) for v in value) + "]"
-    return str(value)
+        return "[" + ", ".join(_yaml_scalar(v, in_flow=True) for v in value) + "]"
+    return _yaml_scalar(value)
 
 
 def normalize_component(c: Component) -> str:
@@ -466,6 +483,8 @@ def normalize_component(c: Component) -> str:
             lines.append(f"{key}: {_format_fm_value(c.fm[key])}")
     lines.append("---")
     body = c.body.strip("\n")
+    if not body:
+        return "\n".join(lines) + "\n"
     return "\n".join(lines) + "\n\n" + body + "\n"
 
 
