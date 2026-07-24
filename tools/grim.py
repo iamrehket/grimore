@@ -390,3 +390,41 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
             )
         )
     return out
+
+
+def check_avoid_terms(store: Store) -> list[Finding]:
+    out: list[Finding] = []
+    avoid: dict[str, str] = {}  # lowercased term -> defining component id
+    for c in store.components:
+        if c.ctype == "term" and c.status == "current":
+            for line in c.body.splitlines():
+                m = AVOID_LINE_RE.match(line.strip())
+                if m:
+                    for raw_term in m.group(1).split(","):
+                        term = raw_term.strip().rstrip(".").strip()
+                        if term:
+                            avoid.setdefault(term.lower(), c.cid)
+    if not avoid:
+        return out
+    patterns = {
+        term: re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", re.IGNORECASE)
+        for term in avoid
+    }
+    for c in store.components:
+        if c.status == "superseded":
+            continue
+        for lineno, line in enumerate(c.body.splitlines(), start=1):
+            if AVOID_LINE_RE.match(line.strip()) or ESCAPE_MARKER in line:
+                continue
+            for term, pattern in patterns.items():
+                if pattern.search(line):
+                    out.append(
+                        error(
+                            "E050",
+                            c.rel,
+                            f"body line {lineno} uses avoided term {term!r} (defined by {avoid[term]}); "
+                            f"append {ESCAPE_MARKER} to the line if the mention is deliberate",
+                            c.cid,
+                        )
+                    )
+    return out
