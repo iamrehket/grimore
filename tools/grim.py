@@ -69,7 +69,15 @@ def load_config(root: Path) -> Config:
             raw = tomllib.loads(cfg_path.read_text(encoding="utf-8")).get("grimore", {})
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f".grimore.toml: {exc}") from None
-    types = tuple(raw.get("types", COMPONENT_TYPES))
+    for key in ("components", "current", "specs", "plans", "default_branch"):
+        if key in raw and not isinstance(raw[key], str):
+            raise ConfigError(f".grimore.toml: {key} must be a string")
+    raw_types = raw.get("types", COMPONENT_TYPES)
+    if not isinstance(raw_types, (list, tuple)) or not all(
+        isinstance(t, str) for t in raw_types
+    ):
+        raise ConfigError(".grimore.toml: types must be a list of strings")
+    types = tuple(raw_types)
     unknown = set(types) - set(COMPONENT_TYPES)
     if unknown:
         raise ConfigError(f".grimore.toml: unknown component types: {sorted(unknown)}")
@@ -282,7 +290,7 @@ def check_edges(store: Store) -> list[Finding]:
                     error("E030", c.rel, f"supersedes target {target!r} does not exist in the store", c.cid)
                 )
                 continue
-            if c.status == "current":
+            if c.status == "current" and isinstance(c.cid, str):
                 live_successors.setdefault(target, []).append(c.cid)
     for target, succs in sorted(live_successors.items()):
         if len(succs) >= 2:
@@ -305,11 +313,11 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
 
 def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
     out: list[Finding] = []
-    if not cfg.components.is_dir():
-        return out
     top = _git(cfg, "rev-parse", "--show-toplevel")
     mb = _git(cfg, "merge-base", "HEAD", cfg.default_branch)
     if top.returncode != 0 or mb.returncode != 0:
+        if not cfg.components.is_dir():
+            return out  # nothing on disk and no history to compare against
         if strict:
             return [
                 error(
@@ -330,7 +338,7 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
     git_root = Path(top.stdout.strip()).resolve()
     base = mb.stdout.strip()
     comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
-    ls = _git(cfg, "ls-tree", "-r", "--name-only", base, "--", comp_prefix)
+    ls = _git(cfg, "ls-tree", "--full-tree", "-r", "-z", "--name-only", base, "--", comp_prefix)
     if ls.returncode != 0:
         if strict:
             return [
@@ -348,17 +356,27 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
                 "cannot list components at merge-base; skipping transition check",
             )
         ]
-    old_paths = set(ls.stdout.splitlines())
-    present_paths = {
-        p.resolve().relative_to(git_root).as_posix()
-        for p in cfg.components.rglob("*.md")
-    }
+    old_paths = {p for p in ls.stdout.split("\0") if p}
+    present_paths = (
+        {
+            p.resolve().relative_to(git_root).as_posix()
+            for p in cfg.components.rglob("*.md")
+        }
+        if cfg.components.is_dir()
+        else set()
+    )
     by_git_rel = {
         c.path.resolve().relative_to(git_root).as_posix(): c for c in store.components
     }
+    root_resolved = cfg.root.resolve()
     for old in sorted(old_paths):
         if old.endswith(".md") and old not in present_paths:
-            out.append(error("E041", old, "component deleted; components are never deleted"))
+            abs_old = git_root / old
+            try:
+                rel = abs_old.relative_to(root_resolved).as_posix()
+            except ValueError:
+                rel = old
+            out.append(error("E041", rel, "component deleted; components are never deleted"))
     for git_rel, c in sorted(by_git_rel.items()):
         if git_rel not in old_paths:
             continue  # new on this branch; any initial status is legal
@@ -453,7 +471,7 @@ def check_plans(cfg: Config) -> list[Finding]:
     return out
 
 
-def _yaml_scalar(value, *, in_flow: bool = False) -> str:
+def _yaml_scalar(value, *, key: str | None = None, in_flow: bool = False) -> str:
     """Emit a scalar that YAML re-parses to the same string, quoting only
     when the plain form would change meaning (e.g. yes -> bool) or break
     flow-sequence syntax (commas, brackets, braces)."""
@@ -462,7 +480,7 @@ def _yaml_scalar(value, *, in_flow: bool = False) -> str:
         reparsed = yaml.safe_load(s)
     except yaml.YAMLError:
         reparsed = object()
-    if isinstance(reparsed, datetime.date):
+    if key == "date" and isinstance(reparsed, datetime.date):
         reparsed = reparsed.isoformat()
     needs_quotes = reparsed != s
     if in_flow and any(ch in s for ch in ",[]{}"):
@@ -470,17 +488,17 @@ def _yaml_scalar(value, *, in_flow: bool = False) -> str:
     return json.dumps(s) if needs_quotes else s
 
 
-def _format_fm_value(value) -> str:
+def _format_fm_value(key: str, value) -> str:
     if isinstance(value, list):
-        return "[" + ", ".join(_yaml_scalar(v, in_flow=True) for v in value) + "]"
-    return _yaml_scalar(value)
+        return "[" + ", ".join(_yaml_scalar(v, key=key, in_flow=True) for v in value) + "]"
+    return _yaml_scalar(value, key=key)
 
 
 def normalize_component(c: Component) -> str:
     lines = ["---"]
     for key in FIELD_ORDER:
         if key in c.fm:
-            lines.append(f"{key}: {_format_fm_value(c.fm[key])}")
+            lines.append(f"{key}: {_format_fm_value(key, c.fm[key])}")
     lines.append("---")
     body = c.body.strip("\n")
     if not body:

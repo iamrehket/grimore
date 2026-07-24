@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 
 import grim
@@ -114,3 +115,25 @@ def test_broken_but_present_component_is_not_deleted(tmp_path):
     (d / "broken.md").write_text("---\nstatus: [unterminated\n", encoding="utf-8")
     commit_all(tmp_path, "add broken component")
     assert transitions(tmp_path) == []
+
+
+def test_project_root_below_git_root(tmp_path):
+    make_repo(tmp_path)
+    project = tmp_path / "sub"
+    write_component(project, "adr", "x", status="current")
+    commit_all(tmp_path, "baseline")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(project, "adr", "x", status="draft")
+    assert codes(transitions(project)) == ["E040"]
+
+
+def test_wholesale_store_deletion_is_e041(tmp_path):
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x")
+    write_component(tmp_path, "adr", "y")
+    commit_all(tmp_path, "baseline")
+    git(tmp_path, "checkout", "-b", "feature")
+    shutil.rmtree(tmp_path / "docs" / "components")
+    findings = transitions(tmp_path, strict=True)
+    assert codes(findings) == ["E041", "E041"]
+    assert findings[0].path == "docs/components/adr/x.md"

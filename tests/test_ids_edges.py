@@ -57,3 +57,13 @@ def test_draft_successor_does_not_count_as_live(tmp_path):
     write_component(tmp_path, "adr", "left", status="current", extra={"supersedes": "[adr-old]"})
     write_component(tmp_path, "adr", "right", status="draft", extra={"supersedes": "[adr-old]"})
     assert grim.check_edges(load(tmp_path)) == []
+
+
+def test_successor_without_id_does_not_crash(tmp_path):
+    write_component(tmp_path, "adr", "old", status="superseded")
+    write_component(tmp_path, "adr", "a", status="current", extra={"supersedes": "[adr-old]"})
+    write_component(
+        tmp_path, "adr", "noid",
+        raw_fm="type: adr\nstatus: current\nsupersedes: [adr-old]\ndate: 2026-07-24",
+    )
+    assert grim.check_edges(load(tmp_path)) == []

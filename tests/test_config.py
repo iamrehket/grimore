@@ -40,3 +40,15 @@ def test_unknown_component_type_raises(tmp_path):
     )
     with pytest.raises(grim.ConfigError):
         grim.load_config(tmp_path)
+
+
+def test_non_string_path_value_raises(tmp_path):
+    (tmp_path / ".grimore.toml").write_text("[grimore]\ncomponents = 42\n", encoding="utf-8")
+    with pytest.raises(grim.ConfigError):
+        grim.load_config(tmp_path)
+
+
+def test_scalar_types_value_raises(tmp_path):
+    (tmp_path / ".grimore.toml").write_text('[grimore]\ntypes = "adr"\n', encoding="utf-8")
+    with pytest.raises(grim.ConfigError):
+        grim.load_config(tmp_path)

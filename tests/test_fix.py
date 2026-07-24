@@ -99,3 +99,15 @@ def test_empty_body_single_trailing_newline(tmp_path):
     text = (tmp_path / "docs" / "components" / "adr" / "x.md").read_text(encoding="utf-8")
     assert text.endswith("---\n")
     assert not text.endswith("\n\n")
+
+
+def test_fix_output_relints_clean(tmp_path):
+    write_component(
+        tmp_path, "note", "arch",
+        raw_fm='status: current\ndate: 2026-07-24\nid: note-arch\ntype: note\nsubsystem: "2026-07-24"',
+    )
+    first = grim.run_lint(tmp_path, fix=True)
+    assert first.errors == []
+    second = grim.run_lint(tmp_path)
+    assert second.errors == []
+    assert grim.run_lint(tmp_path, fix=True).fixed == []
