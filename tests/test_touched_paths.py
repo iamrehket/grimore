@@ -317,3 +317,30 @@ def test_stale_local_default_branch_does_not_expand_waiver_range(tmp_path):
     commit_all(clone, "feature tweak, no waiver")
     codes = lint_codes(clone)
     assert "E070" in codes and "W071" not in codes
+
+
+def test_divergent_local_default_branch_is_ignored_when_origin_resolves(tmp_path):
+    # The clone's local main diverges from origin/main via a local-only
+    # commit carrying a Grim-Waive trailer for the gating component. The
+    # feature branch is cut from origin/main, not local main -- origin must
+    # be the ref actually used to compute the base, so the divergent local
+    # commit (and its waiver) must never enter the guarded range.
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    make_repo(upstream)
+    write_component(upstream, "note", "renderer", extra={"paths": "[src/render/]"})
+    src = upstream / "src" / "render"
+    src.mkdir(parents=True)
+    (src / "x.py").write_text("x = 1\n")
+    commit_all(upstream, "baseline")
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", str(upstream), str(clone))
+    git(clone, "checkout", "-b", "feature", "origin/main")
+    git(clone, "checkout", "main")
+    (clone / "src" / "render" / "x.py").write_text("x = 9\n")
+    commit_all(clone, "local-only divergent commit\n\nGrim-Waive: note-renderer local-only reason")
+    git(clone, "checkout", "feature")
+    (clone / "src" / "render" / "x.py").write_text("x = 3\n")
+    commit_all(clone, "feature tweak, no waiver")
+    codes = lint_codes(clone)
+    assert "E070" in codes and "W071" not in codes

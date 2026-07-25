@@ -334,26 +334,21 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
 
 def resolve_merge_base(cfg: Config, strict: bool) -> tuple[str | None, list[Finding]]:
     top = _git(cfg, "rev-parse", "--show-toplevel")
-    refs_tried = [cfg.default_branch, f"origin/{cfg.default_branch}"]
-    candidates: list[str] = []
+    # origin/<default_branch> is what the PR will actually merge into, so it
+    # is the authoritative base whenever it resolves. The local ref is only
+    # a fallback for repos with no remote (or no fetch of it yet) -- a
+    # stale or divergent local ref must never be preferred over origin, or
+    # commits/waivers that will genuinely land in the PR diff (or that sit
+    # on an upstream branch the guard has no business seeing) get excluded
+    # or wrongly included.
+    refs_tried = [f"origin/{cfg.default_branch}", cfg.default_branch]
+    base = None
     if top.returncode == 0:
         for ref in refs_tried:
             mb = _git(cfg, "merge-base", "HEAD", ref)
             if mb.returncode == 0:
-                sha = mb.stdout.strip()
-                if sha and sha not in candidates:
-                    candidates.append(sha)
-    base = None
-    if len(candidates) == 1:
-        base = candidates[0]
-    elif candidates:
-        # Two distinct bases: a stale ref yields the older one. The newer
-        # base (descendant of the other) reflects the true branch point.
-        first, second = candidates
-        if _git(cfg, "merge-base", "--is-ancestor", first, second).returncode == 0:
-            base = second
-        else:
-            base = first
+                base = mb.stdout.strip()
+                break
     if base is not None:
         return base, []
     if not cfg.components.is_dir():
