@@ -80,6 +80,23 @@ def test_check_is_fail_closed_without_merge_base(tmp_path):
     assert result.exit_code == 1
 
 
+def test_check_skips_byte_compare_on_lint_error(tmp_path):
+    # A lint error (here: a reserved-name subsystem colliding with the fixed
+    # charter.md output key) must short-circuit the byte-compare entirely -
+    # rendering against a store known to be broken can produce bogus or
+    # misleading mismatches. Exit code still fails via lint.errors.
+    import json
+
+    fresh_repo(tmp_path)
+    write_component(tmp_path, "note", "evil", extra={"subsystem": "charter"})
+    result = grim.run_check(tmp_path)
+    assert "E063" in [f.code for f in result.lint.errors]
+    assert result.mismatches == []
+    assert result.exit_code == 1
+    payload = json.loads(result.to_json())
+    assert payload["mismatches"] == []
+
+
 def test_check_verb_json(tmp_path, capsys):
     import json
     fresh_repo(tmp_path)

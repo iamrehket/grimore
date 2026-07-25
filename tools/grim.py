@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6"]
 # ///
-"""grim - doc-components tooling. IAM-38 ships the lint verb.
+"""grim - doc-components tooling. Ships the lint, render, and check verbs.
 
 Requirements doc: doc-components/SCHEMA.md.
 Spec: docs/superpowers/specs/2026-07-24-doc-components-design.md.
@@ -570,6 +570,8 @@ def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
             continue
         new_text = normalize_component(c)
         if new_text != c.path.read_text(encoding="utf-8"):
+            if c.path.is_symlink():
+                raise ConfigError(f"{c.rel} is a symlink; refusing to render through it")
             c.path.write_text(new_text, encoding="utf-8")
             fixed.append(c.rel)
     return fixed
@@ -699,8 +701,11 @@ def write_render(cfg: Config, rendered: dict[str, str]) -> tuple[list[str], list
         cfg.current.mkdir(parents=True, exist_ok=True)
     for name in sorted(rendered):
         path = cfg.current / name
-        if not path.is_file() or path.read_text(encoding="utf-8") != rendered[name]:
-            path.write_text(rendered[name], encoding="utf-8")
+        if path.is_symlink():
+            raise ConfigError(f"{path.relative_to(cfg.root).as_posix()} is a symlink; refusing to render through it")
+        content_bytes = rendered[name].encode("utf-8")
+        if not path.is_file() or path.read_bytes() != content_bytes:
+            path.write_bytes(content_bytes)
             written.append(path.relative_to(cfg.root).as_posix())
     if cfg.current.is_dir():
         for path in sorted(cfg.current.glob("*.md")):
@@ -752,8 +757,15 @@ def run_render(root: Path) -> RenderResult:
 def run_check(root: Path) -> CheckResult:
     root = root.resolve()
     cfg = load_config(root)
-    store = load_store(cfg)
     lint = run_lint(root, fix=False, strict=True)
+    if lint.errors:
+        # Don't render or byte-compare against a store we already know is
+        # broken: lint errors (e.g. a reserved-name subsystem colliding with
+        # a fixed output key, or traversal-shaped paths) can make render_store
+        # silently drop or overwrite entries, producing bogus mismatches.
+        # Lint errors alone already fail the exit code; no CI signal is lost.
+        return CheckResult(lint=lint, mismatches=[])
+    store = load_store(cfg)
     rendered = {name: content.encode("utf-8") for name, content in render_store(store).items()}
     committed = (
         {p.name: p.read_bytes() for p in sorted(cfg.current.glob("*.md"))}
@@ -836,9 +848,12 @@ def main(argv: list[str] | None = None) -> int:
                 for f in result.lint.findings:
                     location = f.path + (f" [{f.component}]" if f.component else "")
                     print(f"{f.level.upper()} {f.code} {location}: {f.message}")
-                for f in result.mismatches:
-                    location = f.path + (f" [{f.component}]" if f.component else "")
-                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                if result.lint.errors:
+                    print("byte-compare skipped: fix lint errors first")
+                else:
+                    for f in result.mismatches:
+                        location = f.path + (f" [{f.component}]" if f.component else "")
+                        print(f"{f.level.upper()} {f.code} {location}: {f.message}")
                 lint_summary = f"{len(result.lint.errors)} error(s), {len(result.lint.warnings)} warning(s)"
                 if result.mismatches:
                     lint_summary += f", {len(result.mismatches)} mismatch(es)"
@@ -847,6 +862,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raise AssertionError(f"unknown verb {args.verb!r}")
     except ConfigError as exc:
+        print(f"grim: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
         print(f"grim: {exc}", file=sys.stderr)
         return 2
 

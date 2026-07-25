@@ -122,6 +122,38 @@ def test_run_render_refusal_does_not_prune(tmp_path):
     assert (tmp_path / "docs" / "current" / "decisions.md").exists()  # untouched
 
 
+def test_render_refuses_symlink_output(tmp_path):
+    # A symlinked docs/current/decisions.md pointing outside the project
+    # must be refused, not written through (arbitrary file write).
+    project = tmp_path / "project"
+    project.mkdir()
+    write_component(project, "adr", "why")
+    victim = tmp_path / "victim.md"
+    victim.write_text("do not touch\n")
+    current = project / "docs" / "current"
+    current.mkdir(parents=True)
+    (current / "decisions.md").symlink_to(victim)
+    exit_code = grim.main(["render", "--root", str(project)])
+    assert exit_code == 2
+    assert victim.read_text() == "do not touch\n"  # target untouched
+    assert (current / "decisions.md").is_symlink()  # link itself left alone
+
+
+def test_write_render_rewrites_non_utf8_existing_output(tmp_path):
+    # run_check's FIX_HINT tells users to run render to fix a byte-mismatch;
+    # render must not itself crash on a non-UTF-8 existing output.
+    write_component(tmp_path, "adr", "why")
+    cfg, store = load(tmp_path)
+    current = tmp_path / "docs" / "current"
+    current.mkdir(parents=True)
+    (current / "decisions.md").write_bytes(b"\xff\xfe not valid utf-8")
+    rendered = grim.render_store(store)
+    written, removed = grim.write_render(cfg, rendered)
+    assert written == ["docs/current/decisions.md"]
+    assert removed == []
+    assert (current / "decisions.md").read_bytes() == rendered["decisions.md"].encode("utf-8")
+
+
 def test_render_never_touches_external_current_dir(tmp_path):
     # A current: configured outside the project root must die at load_config
     # (Task 1 validation) before write_render can write or prune anything there.

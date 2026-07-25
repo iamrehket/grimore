@@ -31,4 +31,4 @@ def test_examples_render(tmp_path):
     assert out1 == out2
     # Assert on unique body text, not ids: rendered output contains bodies only.
     assert "Number ADRs adr-0001" not in out1["decisions.md"]   # superseded body skipped
-    assert "Draft until IAM-40 lands" not in out1.get("renderer.md", "")  # draft body skipped
+    assert "renderer.md" not in out1  # draft-only subsystem produces no file
