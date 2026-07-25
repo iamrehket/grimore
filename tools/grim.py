@@ -28,6 +28,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ESCAPE_MARKER = "<!-- grim:ok -->"
 AVOID_LINE_RE = re.compile(r"^_Avoid_:\s*(.+?)\.?\s*$")
+RESERVED_OUTPUTS = ("charter", "decisions", "glossary", "general")
 FIELD_ORDER = ("id", "type", "status", "supersedes", "subsystem", "paths", "date")
 REQUIRED_FIELDS = ("id", "type", "status", "date")
 PATHS_TYPES = {"note", "adr"}
@@ -270,6 +271,10 @@ def check_schema(store: Store, cfg: Config) -> list[Finding]:
                 out.append(
                     warning("W061", rel, "subsystem has no effect on non-note components", cid)
                 )
+            elif not SLUG_RE.fullmatch(fm["subsystem"]):
+                out.append(error("E062", rel, f"subsystem {fm['subsystem']!r} must match [a-z0-9][a-z0-9-]*", cid))
+            elif fm["subsystem"] in RESERVED_OUTPUTS:
+                out.append(error("E063", rel, f"subsystem {fm['subsystem']!r} collides with a fixed render output", cid))
     return out
 
 

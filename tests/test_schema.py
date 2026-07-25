@@ -101,3 +101,15 @@ def test_subsystem_on_adr_is_w061(tmp_path):
     findings = schema_findings(tmp_path)
     assert codes(findings) == ["W061"]
     assert findings[0].level == "warning"
+
+
+def test_subsystem_must_be_slug_shaped(tmp_path):
+    write_component(tmp_path, "note", "n", extra={"subsystem": "Bad/Name"})
+    findings = schema_findings(tmp_path)
+    assert [f.code for f in findings] == ["E062"]
+
+
+def test_subsystem_may_not_shadow_fixed_outputs(tmp_path):
+    write_component(tmp_path, "note", "n", extra={"subsystem": "charter"})
+    findings = schema_findings(tmp_path)
+    assert [f.code for f in findings] == ["E063"]
