@@ -1,6 +1,6 @@
 # Result: GREEN run, scenario-ingest-cache
 
-Date: 2026-07-25. Sonnet subagent, align/SKILL.md as process instructions, fresh fixture per run. 8 runs to first PASS (run 8); two de-overfitting review rounds followed, each with a confirmation re-run.
+Date: 2026-07-25. Sonnet subagent, align/SKILL.md as process instructions, fresh fixture per run. 8 runs to first PASS; round 1 confirmed on one re-run; round 2 took a regression on its first re-run and passed on the second (11 runs total).
 
 ## Failure modes and fixes (runs 1-7, one line each)
 
@@ -37,5 +37,13 @@ Review flagged the "window/policy/limit/mode/config" parenthetical as still reve
 3. docs/components/nongoal/manual-purge.md - after answer 4
 4. docs/specs/2026-07-25-ingest-caching-layer.md - after answer 5
 (no component file written or edited after scripted answer 6)
+
+## Post-confirmation edits (22d076c)
+
+Four review fixes landed on `align/SKILL.md` after the last confirming run (a840ffe): trigger-only description, a "when NOT to use" gate, doc-components path anchoring, and a grim-path hedge on the lint command. None touch capture or interview behavior, and each is inert in this fixture: grim is present here, so the hedged command resolves to the same real path either way; the fixture's components dir exists, so the NOT-gate never fires; the description is consumed as a trigger phrase, not executed as behavior; and the anchoring sentence resolves to this fixture's own doc-components/ copy, which is what the skill always used. No re-run required.
+
+## Accepted residual risk
+
+Rubric line 2 (exact ADR slug) showed inherent n=1 variance across the 11 runs recorded here - the scripted answer contains two legitimate candidate words ("stale" and "serve") for the same settled decision, so slug choice from principle-level rules alone is not fully deterministic.
 
 ## Verdict: PASS (7/7), confirmed on twice-generalized text

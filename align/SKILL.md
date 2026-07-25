@@ -47,8 +47,10 @@ instead - do not create a component tree nobody asked for.
    of them - terms and non-goals included, not only ADRs (for example,
    "Slug IDs instead of sequential ADR numbers: adr-slug-ids") - and never
    restating what the component says; the component is canonical, this
-   section only points at it. Run the lint step described under Inline
-   capture below before presenting this draft to the user.
+   section only points at it. Never write inside the spec template's
+   `<!-- grim:status -->` ... `<!-- /grim:status -->` block - it is
+   script-owned. Run the lint step described under Inline capture below
+   before presenting this draft to the user.
 
 5. **Review loop.** Dispatch a spec-reviewer subagent with the spec and the
    components it references; see Spec review loop below. Fix real issues
@@ -63,9 +65,9 @@ instead - do not create a component tree nobody asked for.
 
 ## Inline capture (the point of this skill)
 
-Template and schema paths below are relative to the doc-components
-directory shipped with this skill; in an adopting project, use its copy
-of that directory.
+Template and schema paths in this skill are relative to the project's
+doc-components/ directory - in this repo, at the repo root; in an
+adopting project, its own copy.
 
 Capture happens at the moment something settles - mid-interview, before
 the next question. Never defer to a batch pass at the end; a session
@@ -78,6 +80,10 @@ interrupted after a decision but before a batch pass loses the decision.
 | Confirmed "the system must let X do Y" | usecase component | doc-components/templates/usecase.md |
 | Accepted a hard limit (platform, budget, floor/ceiling) | constraint component | doc-components/templates/constraint.md |
 | Explicitly excluded something ("we will not...") | nongoal component | doc-components/templates/nongoal.md |
+
+Note components are deliberately absent from this table - subsystem
+facts are captured by finish-docs at branch finish, not during
+alignment.
 
 Decisions below the ADR bar (reversible, unsurprising, no trade-off) go
 in the spec body only - do not mint components for them.
@@ -102,10 +108,10 @@ hard-to-reverse trade-off, distinct from picking the approach.
 Procedure per capture:
 1. Copy the template; fill every field. status: draft always - this
    skill never writes current, never promotes, never edits an existing
-   non-draft component. date: today in ISO YYYY-MM-DD. Slug: lowercase
-   [a-z0-9-], the filename is the slug, id is <type>-<slug> (SCHEMA.md
-   governs). Build the slug from the words the user used when the
-   decision settled:
+   non-draft component. date: today in ISO YYYY-MM-DD. Slug:
+   [a-z0-9][a-z0-9-]* (no leading hyphen), the filename is the slug, id
+   is <type>-<slug> (SCHEMA.md governs). Build the slug from the words
+   the user used when the decision settled:
    - Their own nouns and verbs, not your paraphrase - the words already
      spoken are the identity; don't re-describe the idea.
    - Name the decision, not its category: never append an invented
@@ -145,7 +151,10 @@ Procedure per capture:
    reverse a decision's substance. If the session reverses a decision
    that predates it (an existing current component), author the new
    draft with a supersedes: edge instead - the edge takes effect at
-   promotion, not now, and this skill never promotes.
+   promotion, not now, and this skill never promotes. A draft written
+   under a wrong slug captured no settled decision - that is a mistake,
+   not a lifecycle event: delete the file and rewrite it under the
+   correct slug; no superseded flip, no supersedes edge.
 
 If grim is available (tools/grim.py or the adopting project's copy),
 run `uv run <path-to-grim>/grim.py lint --root <project-root>` (in this
