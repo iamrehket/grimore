@@ -718,6 +718,7 @@ def run_render(root: Path) -> RenderResult:
     lint = run_lint(root, fix=False, strict=False)
     if lint.errors:
         return RenderResult(written=[], removed=[], findings=lint.findings)
+    # Re-reads disk after the gate; assumes no concurrent writer (single-user CLI).
     cfg = load_config(root)
     store = load_store(cfg)
     written, removed = write_render(cfg, render_store(store))
@@ -776,6 +777,8 @@ def main(argv: list[str] | None = None) -> int:
                     summary = f"{len(result.written)} file(s) written, {len(result.removed)} removed"
                     print(summary)
             return result.exit_code
+        else:
+            raise AssertionError(f"unknown verb {args.verb!r}")
     except ConfigError as exc:
         print(f"grim: {exc}", file=sys.stderr)
         return 2
