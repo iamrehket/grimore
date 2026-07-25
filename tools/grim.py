@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import hashlib
 import json
 import re
 import subprocess
@@ -537,6 +538,28 @@ def normalize_component(c: Component) -> str:
     if not body:
         return "\n".join(lines) + "\n"
     return "\n".join(lines) + "\n\n" + body + "\n"
+
+
+HEADING_RE = re.compile(r"^(#{1,6})(?=\s)", re.MULTILINE)
+
+
+def demote_headings(body: str, levels: int) -> str:
+    return HEADING_RE.sub(lambda m: "#" * min(6, len(m.group(1)) + levels), body)
+
+
+def store_hash(store: Store) -> str:
+    h = hashlib.sha256()
+    pairs = sorted(
+        (c.rel, normalize_component(c))
+        for c in store.components
+        if c.status == "current"
+    )
+    for rel, content in pairs:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(content.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()
 
 
 def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
