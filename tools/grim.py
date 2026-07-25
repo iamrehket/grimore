@@ -360,7 +360,7 @@ def collect_waivers(cfg: Config, base: str) -> dict[str, list[str]]:
     # commit body prose is NOT a waiver.
     log = _git(
         cfg, "log", "--reverse",
-        "--format=%(trailers:key=Grim-Waive,valueonly=true)%x00",
+        "--format=%(trailers:key=Grim-Waive,valueonly=true,unfold=true)%x00",
         f"{base}..HEAD",
     )
     waivers: dict[str, list[str]] = {}
@@ -484,7 +484,15 @@ def check_touched_paths(store: Store, cfg: Config, base: str | None, strict: boo
     if base is None or not gating:
         return out
     top = _git(cfg, "rev-parse", "--show-toplevel")
-    diff = _git(cfg, "diff", "--name-only", "-z", base)
+    # --no-renames: a plain `diff --name-only` collapses a detected rename to
+    # only its destination path, so `git mv` out of a guarded paths: prefix
+    # would report zero touched paths and silently bypass the guard.
+    # -c diff.relative=false: a user-level `git config diff.relative true`
+    # would make git print paths relative to cwd instead of the repo root
+    # when cfg.root is nested under the git root, silently emptying the
+    # touched set. Override in the same invocation (git >= 2.22; avoid
+    # --no-relative, which needs 2.28).
+    diff = _git(cfg, "-c", "diff.relative=false", "diff", "--no-renames", "--name-only", "-z", base)
     if top.returncode != 0 or diff.returncode != 0:
         # Do not silently skip: in CI a skipped guard is a bypassed guard.
         if strict:

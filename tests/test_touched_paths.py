@@ -57,6 +57,29 @@ def test_collect_waivers_ignores_base_side_and_malformed(tmp_path):
     assert grim.collect_waivers(cfg, base_of(tmp_path)) == {}
 
 
+def test_collect_waivers_unfolds_wrapped_trailer(tmp_path):
+    # Git folds a long trailer value onto a continuation line indented with
+    # whitespace. Without unfold=true, %(trailers:...) returns the
+    # continuation as a separate line, truncating the reason and minting a
+    # spurious waiver keyed on the continuation's leading word.
+    make_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("a")
+    commit_all(tmp_path, "init")
+    git(tmp_path, "checkout", "-b", "feature")
+    (tmp_path / "b.txt").write_text("b")
+    commit_all(
+        tmp_path,
+        "change\n\n"
+        "Grim-Waive: note-renderer comment-only change to the\n"
+        "  logging format, no behavior change",
+    )
+    cfg = grim.load_config(tmp_path)
+    waivers = grim.collect_waivers(cfg, base_of(tmp_path))
+    assert waivers == {
+        "note-renderer": ["comment-only change to the logging format, no behavior change"],
+    }
+
+
 def test_body_mention_outside_trailer_block_is_not_a_waiver(tmp_path):
     make_repo(tmp_path)
     (tmp_path / "a.txt").write_text("a")
@@ -106,6 +129,19 @@ def test_hit_without_component_change_is_e070(tmp_path):
     assert lint_codes(tmp_path) == ["E070"]
     [finding] = [f for f in grim.run_lint(tmp_path).findings if f.code == "E070"]
     assert "Grim-Waive: note-renderer" in finding.message  # tells the operator the exact trailer
+
+
+def test_rename_out_of_guarded_prefix_is_e070(tmp_path):
+    # `git diff --name-only` collapses a detected rename to only its
+    # destination path; without --no-renames, moving the guarded file out
+    # of the tree entirely would report zero touched paths and bypass the
+    # guard silently.
+    src = guarded_repo(tmp_path)
+    dest_dir = tmp_path / "src" / "other"
+    dest_dir.mkdir(parents=True)
+    git(tmp_path, "mv", str(src / "x.py"), str(dest_dir / "x.py"))
+    commit_all(tmp_path, "move renderer out of src/render")
+    assert lint_codes(tmp_path) == ["E070"]
 
 
 def test_hit_with_component_change_is_clean(tmp_path):
@@ -208,7 +244,7 @@ def test_no_merge_base_skips_guard_with_single_warning(tmp_path):
 def _failing_diff_git(real_git):
     def wrapper(cfg, *args):
         r = real_git(cfg, *args)
-        if args and args[0] == "diff":
+        if "diff" in args:
             r.returncode = 128
         return r
     return wrapper
@@ -222,6 +258,30 @@ def test_diff_failure_fails_closed_in_strict(tmp_path, monkeypatch):
     result = grim.run_lint(tmp_path, strict=True)
     codes = [f.code for f in result.findings]
     assert "E072" in codes and "E070" not in codes  # failed closed, not silently green
+
+
+def test_nested_root_with_diff_relative_config_still_fires(tmp_path):
+    # A user-level `git config diff.relative true` makes `git diff --name-only`
+    # print paths relative to cwd instead of the git root. When cfg.root is
+    # nested under the git root (cwd == cfg.root for every git invocation),
+    # that silently turns git-root-relative touched paths into cwd-relative
+    # ones that no longer match a component's paths: globs -- the guard must
+    # override this in its own diff invocation, not inherit it.
+    make_repo(tmp_path)
+    git(tmp_path, "config", "diff.relative", "true")
+    project = tmp_path / "project"
+    write_component(
+        project, "note", "renderer",
+        extra={"subsystem": "renderer", "paths": "[project/src/render/]"},
+    )
+    src = project / "src" / "render"
+    src.mkdir(parents=True)
+    (src / "x.py").write_text("x = 1\n")
+    commit_all(tmp_path, "baseline")
+    git(tmp_path, "checkout", "-b", "feature")
+    (src / "x.py").write_text("x = 2\n")
+    commit_all(tmp_path, "tweak renderer")
+    assert "E070" in lint_codes(project)
 
 
 def test_diff_failure_warns_locally(tmp_path, monkeypatch):
