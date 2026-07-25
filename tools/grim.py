@@ -81,12 +81,22 @@ def load_config(root: Path) -> Config:
     unknown = set(types) - set(COMPONENT_TYPES)
     if unknown:
         raise ConfigError(f".grimore.toml: unknown component types: {sorted(unknown)}")
+    resolved_root = root.resolve()
+    paths = {
+        key: root / raw.get(key, DEFAULTS[key])
+        for key in ("components", "current", "specs", "plans")
+    }
+    for key, p in paths.items():
+        if not p.resolve().is_relative_to(resolved_root):
+            raise ConfigError(
+                f".grimore.toml: {key} must resolve inside the project root, got {p}"
+            )
     return Config(
         root=root,
-        components=root / raw.get("components", DEFAULTS["components"]),
-        current=root / raw.get("current", DEFAULTS["current"]),
-        specs=root / raw.get("specs", DEFAULTS["specs"]),
-        plans=root / raw.get("plans", DEFAULTS["plans"]),
+        components=paths["components"],
+        current=paths["current"],
+        specs=paths["specs"],
+        plans=paths["plans"],
         default_branch=raw.get("default_branch", DEFAULTS["default_branch"]),
         types=types,
     )
@@ -182,7 +192,11 @@ def load_store(cfg: Config) -> Store:
                 error("E005", rel, f"unknown component type directory {parent.name!r}")
             )
             continue
-        comp, errs = parse_component(path, cfg.root)
+        try:
+            comp, errs = parse_component(path, cfg.root)
+        except UnicodeDecodeError:
+            findings.append(error("E006", rel, "file is not valid UTF-8"))
+            continue
         findings.extend(errs)
         if comp is not None:
             components.append(comp)
@@ -314,30 +328,39 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
 def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
     out: list[Finding] = []
     top = _git(cfg, "rev-parse", "--show-toplevel")
-    mb = _git(cfg, "merge-base", "HEAD", cfg.default_branch)
-    if top.returncode != 0 or mb.returncode != 0:
+    refs_tried = [cfg.default_branch, f"origin/{cfg.default_branch}"]
+    base = None
+    if top.returncode == 0:
+        for ref in refs_tried:
+            mb = _git(cfg, "merge-base", "HEAD", ref)
+            if mb.returncode == 0:
+                base = mb.stdout.strip()
+                break
+    if base is None:
         if not cfg.components.is_dir():
             return out  # nothing on disk and no history to compare against
         if strict:
             return [
                 error(
-                    "E042",
-                    ".",
-                    f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                    "E042", ".",
+                    f"cannot resolve git merge-base with any of {refs_tried}; "
                     "failing closed (fix CI: fetch-depth: 0)",
                 )
             ]
         return [
             warning(
-                "W042",
-                ".",
-                f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                "W042", ".",
+                f"cannot resolve git merge-base with any of {refs_tried}; "
                 "skipping transition check",
             )
         ]
     git_root = Path(top.stdout.strip()).resolve()
-    base = mb.stdout.strip()
-    comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
+    try:
+        comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
+    except ValueError:
+        raise ConfigError(
+            f"components dir {cfg.components} is outside the git repository {git_root}"
+        ) from None
     ls = _git(cfg, "ls-tree", "--full-tree", "-r", "-z", "--name-only", base, "--", comp_prefix)
     if ls.returncode != 0:
         if strict:
@@ -454,7 +477,12 @@ def check_plans(cfg: Config) -> list[Finding]:
         return out
     for path in sorted(cfg.plans.rglob("*.md")):
         rel = path.relative_to(cfg.root).as_posix()
-        m = FM_RE.match(path.read_text(encoding="utf-8"))
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            out.append(warning("W060", rel, "plan is not valid UTF-8; spec: check skipped"))
+            continue
+        m = FM_RE.match(text)
         has_spec = False
         if m:
             try:

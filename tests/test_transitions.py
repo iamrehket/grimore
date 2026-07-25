@@ -104,7 +104,7 @@ def test_no_repo_strict_is_e042(tmp_path):
     assert findings[0].level == "error"
 
 
-def test_empty_store_skips_git_entirely(tmp_path):
+def test_missing_components_dir_with_unresolvable_merge_base_is_clean(tmp_path):
     assert transitions(tmp_path, strict=True) == []
 
 
@@ -127,6 +127,19 @@ def test_project_root_below_git_root(tmp_path):
     assert codes(transitions(project)) == ["E040"]
 
 
+def test_wholesale_store_deletion_in_subdirectory_reports_relative_to_config_root(tmp_path):
+    make_repo(tmp_path)
+    sub = tmp_path / "sub"
+    write_component(sub, "adr", "x")
+    write_component(sub, "adr", "y")
+    commit_all(tmp_path, "baseline")
+    git(tmp_path, "checkout", "-b", "feature")
+    shutil.rmtree(sub / "docs" / "components")
+    findings = transitions(sub, strict=True)
+    assert codes(findings) == ["E041", "E041"]
+    assert findings[0].path == "docs/components/adr/x.md"
+
+
 def test_wholesale_store_deletion_is_e041(tmp_path):
     make_repo(tmp_path)
     write_component(tmp_path, "adr", "x")
@@ -137,3 +150,45 @@ def test_wholesale_store_deletion_is_e041(tmp_path):
     findings = transitions(tmp_path, strict=True)
     assert codes(findings) == ["E041", "E041"]
     assert findings[0].path == "docs/components/adr/x.md"
+
+
+def test_merge_base_falls_back_to_origin_default_branch(tmp_path):
+    # Simulate CI checkout of a PR branch: local repo has no local 'main',
+    # only 'origin/main'.
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    make_repo(upstream)
+    write_component(upstream, "adr", "x", status="draft")
+    commit_all(upstream, "add draft")
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", str(upstream), str(clone))
+    git(clone, "checkout", "-b", "feature")
+    git(clone, "branch", "-D", "main")
+    write_component(clone, "adr", "x", status="current")
+    assert transitions(clone) == []  # resolved via origin/main, promotion legal
+
+
+def test_unresolvable_merge_base_message_names_both_refs(tmp_path):
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x")
+    findings = transitions(tmp_path, strict=True)  # no commits: HEAD unresolvable
+    assert [f.code for f in findings] == ["E042"]
+    assert "origin/main" in findings[0].message
+
+
+def test_configured_path_outside_root_is_config_error(tmp_path):
+    # Must fail at load_config, BEFORE load_store ever walks the tree:
+    # load_store's path.relative_to(cfg.root) would otherwise crash first.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    make_repo(repo)
+    (repo / "x.txt").write_text("x")
+    commit_all(repo, "init")
+    outside = tmp_path / "elsewhere"
+    write_component(outside, "adr", "x")
+    (repo / ".grimore.toml").write_text(
+        f'[grimore]\ncomponents = "{(outside / "docs" / "components").as_posix()}"\n'
+    )
+    import pytest
+    with pytest.raises(grim.ConfigError):
+        grim.load_config(repo)
