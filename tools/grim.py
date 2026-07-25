@@ -350,6 +350,29 @@ def resolve_merge_base(cfg: Config, strict: bool) -> tuple[str | None, list[Find
     return None, [warning("W042", ".", f"cannot resolve git merge-base with any of {refs_tried}; skipping transition and touched-path checks")]
 
 
+WAIVE_VALUE_RE = re.compile(r"^(\S+)\s+(\S.*?)\s*$")
+
+
+def collect_waivers(cfg: Config, base: str) -> dict[str, list[str]]:
+    # Let git identify the trailer block: %(trailers:key=...) only reads the
+    # final trailer paragraph, so a "Grim-Waive:" quoted or discussed in the
+    # commit body prose is NOT a waiver.
+    log = _git(
+        cfg, "log", "--reverse",
+        "--format=%(trailers:key=Grim-Waive,valueonly=true)%x00",
+        f"{base}..HEAD",
+    )
+    waivers: dict[str, list[str]] = {}
+    if log.returncode != 0:
+        return waivers
+    for block in log.stdout.split("\0"):
+        for line in block.splitlines():
+            m = WAIVE_VALUE_RE.match(line.strip())
+            if m:
+                waivers.setdefault(m.group(1), []).append(m.group(2))
+    return waivers
+
+
 def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool) -> list[Finding]:
     out: list[Finding] = []
     if base is None:
