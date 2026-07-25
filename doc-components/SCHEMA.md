@@ -95,8 +95,10 @@ Plans:
 
 ## Render mapping (informative)
 
-Implemented by grim render (IAM-40); recorded here so authors know where
+Implemented by `grim render`; recorded here so authors know where
 a component surfaces. Only `status: current` components render.
+
+Rendered files carry a `grim:store-hash` provenance comment and a do-not-edit marker; `grim check` verifies by byte-compare, not by hash.
 
 | Output | Source |
 |---|---|
