@@ -647,6 +647,30 @@ class LintResult:
         )
 
 
+@dataclasses.dataclass
+class CheckResult:
+    lint: LintResult
+    mismatches: list[Finding]
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if self.lint.errors or self.mismatches else 0
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "ok": self.exit_code == 0,
+                "errors": [dataclasses.asdict(f) for f in self.lint.errors],
+                "warnings": [dataclasses.asdict(f) for f in self.lint.warnings],
+                "mismatches": [dataclasses.asdict(f) for f in self.mismatches],
+            },
+            indent=2,
+        )
+
+
+FIX_HINT = "run: grim lint --fix && grim render, and commit the result"
+
+
 def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResult:
     root = root.resolve()
     cfg = load_config(root)
@@ -725,6 +749,30 @@ def run_render(root: Path) -> RenderResult:
     return RenderResult(written=written, removed=removed, findings=lint.findings)
 
 
+def run_check(root: Path) -> CheckResult:
+    root = root.resolve()
+    cfg = load_config(root)
+    store = load_store(cfg)
+    lint = run_lint(root, fix=False, strict=True)
+    rendered = {name: content.encode("utf-8") for name, content in render_store(store).items()}
+    committed = (
+        {p.name: p.read_bytes() for p in sorted(cfg.current.glob("*.md"))}
+        if cfg.current.is_dir()
+        else {}
+    )
+    mismatches: list[Finding] = []
+    current_rel = cfg.current.relative_to(cfg.root).as_posix()
+    for name in sorted(set(rendered) | set(committed)):
+        rel = f"{current_rel}/{name}"
+        if name not in committed:
+            mismatches.append(error("E080", rel, f"rendered file missing from {current_rel}/; {FIX_HINT}"))
+        elif name not in rendered:
+            mismatches.append(error("E080", rel, f"stale file: fresh render does not produce it; {FIX_HINT}"))
+        elif committed[name] != rendered[name]:
+            mismatches.append(error("E080", rel, f"out of date: committed bytes differ from fresh render; {FIX_HINT}"))
+    return CheckResult(lint=lint, mismatches=mismatches)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="grim", description="doc-components tooling")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -741,6 +789,9 @@ def main(argv: list[str] | None = None) -> int:
     render_p = sub.add_parser("render", help="compile docs/current/ from current components")
     render_p.add_argument("--json", action="store_true", help="machine-readable output")
     render_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
+    check_p = sub.add_parser("check", help="verify committed docs/current/ matches fresh render")
+    check_p.add_argument("--json", action="store_true", help="machine-readable output")
+    check_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
     args = parser.parse_args(argv)
     try:
         if args.verb == "lint":
@@ -776,6 +827,22 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"REMOVED {rel}")
                     summary = f"{len(result.written)} file(s) written, {len(result.removed)} removed"
                     print(summary)
+            return result.exit_code
+        elif args.verb == "check":
+            result = run_check(args.root)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.lint.findings:
+                    location = f.path + (f" [{f.component}]" if f.component else "")
+                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                for f in result.mismatches:
+                    location = f.path + (f" [{f.component}]" if f.component else "")
+                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                lint_summary = f"{len(result.lint.errors)} error(s), {len(result.lint.warnings)} warning(s)"
+                if result.mismatches:
+                    lint_summary += f", {len(result.mismatches)} mismatch(es)"
+                print(lint_summary)
             return result.exit_code
         else:
             raise AssertionError(f"unknown verb {args.verb!r}")
