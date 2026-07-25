@@ -41,7 +41,7 @@ happen at all.
    frontmatter lists every component captured this session. The Decisions
    section is an index: one line per captured component ID, covering all
    of them - terms and non-goals included, not only ADRs (for example,
-   "Serve-stale window over always-fresh: adr-serve-stale-24h") - and never
+   "Slug IDs over sequential numbering: adr-slug-ids") - and never
    restating what the component says; the component is canonical, this
    section only points at it. Run the lint step described under Inline
    capture below before presenting this draft to the user.
@@ -81,7 +81,7 @@ Procedure per capture:
    filename is the slug, id is <type>-<slug> (SCHEMA.md governs).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
-3. Announce it in one line: "captured term-fetch-record (draft)". Then
+3. Announce it in one line: "captured adr-slug-ids (draft)". Then
    return to the interview where you left off.
 4. If the session revises a still-draft capture, SCHEMA.md draws the
    line: details changed but the decision stands - amend the draft in
