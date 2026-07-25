@@ -166,7 +166,7 @@ git commit -m "IAM-39: pressure-test scenario and RED baseline for align"
 
 - [ ] **Step 2: Write the session flow section**, in this order, adapted from superpowers brainstorming but restructured around capture:
 
-1. **Orient.** Read `docs/current/` (or the configured current dir) if it exists, glossary first — settled terminology governs the interview. Read `.grimore.toml` for paths; fall back to `docs/components/`, `docs/specs/` defaults.
+1. **Orient.** Read `docs/current/` (or the configured current dir) if it exists, glossary first — settled terminology governs the interview. Read `.grimore.toml` for paths AND the enabled component types (`types` key; when absent, all six types are enabled); fall back to `docs/components/`, `docs/specs/` defaults.
 2. **Interview.** One question at a time, never a wall of questions. Prefer multiple-choice (AskUserQuestion-style with 2-4 options) over open-ended. Cover in rough order: purpose (why now, what hurts), actors and use cases, constraints (hard limits accepted), success criteria, explicit exclusions. Follow the user's energy; the order bends, the one-at-a-time rule does not.
 3. **Approaches.** Propose 2-3 approaches with a concrete recommendation and the trade-off each accepts. Multiple-choice the selection.
 4. **Spec.** Author from `doc-components/templates/spec.md` into the configured specs dir, dated filename. `components:` frontmatter lists every component captured this session; the Decisions section is an index with one entry per captured component ID — all of them, terms and non-goals included, not only ADRs ("Slug IDs instead of sequential ADR numbers: adr-slug-ids") — never restating component content. Run the lint step (below) before presenting this draft to the user.
@@ -197,6 +197,13 @@ interrupted after a decision but before a batch pass loses the decision.
 Note components are deliberately absent from this table - subsystem
 facts are captured by finish-docs at branch finish, not during
 alignment.
+
+If a crystallization moment calls for a component type the project has
+not enabled, do not create the file - grim rejects components of
+disabled types. Record the decision in the spec body instead (the
+Decisions section for ADR-bar decisions, the relevant prose section
+otherwise), tell the user the type is disabled, and move on. Only
+enabled types are captured as components.
 
 Decisions below the ADR bar (reversible, unsurprising, no trade-off) go
 in the spec body only - do not mint components for them.

@@ -40,7 +40,7 @@ Review flagged the "window/policy/limit/mode/config" parenthetical as still reve
 
 ## Post-confirmation edits (22d076c)
 
-Four review fixes landed on `align/SKILL.md` after the last confirming run (a840ffe): trigger-only description, a "when NOT to use" gate, doc-components path anchoring, and a grim-path hedge on the lint command. None touch capture or interview behavior, and each is inert in this fixture: grim is present here, so the hedged command resolves to the same real path either way; the fixture's components dir exists, so the NOT-gate never fires; the description is consumed as a trigger phrase, not executed as behavior; and the anchoring sentence resolves to this fixture's own doc-components/ copy, which is what the skill always used. No re-run required.
+Four review fixes landed on `align/SKILL.md` after the last confirming run (a840ffe): trigger-only description, a "when NOT to use" gate, doc-components path anchoring, and a grim-path hedge on the lint command. None touch capture or interview behavior, and each is inert in this fixture: grim is present here, so the hedged command resolves to the same real path either way; the fixture's components dir exists, so the NOT-gate never fires; the description is consumed as a trigger phrase, not executed as behavior; and the anchoring sentence resolves to this fixture's own doc-components/ copy, which is what the skill always used. No re-run required. The later types-aware capture clause (skip disabled component types) is likewise inert here: the fixture has no `.grimore.toml`, so all six types are enabled and behavior is unchanged.
 
 ## Accepted residual risk
 

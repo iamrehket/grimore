@@ -22,8 +22,9 @@ instead - do not create a component tree nobody asked for.
    the current dir) exists, read it - glossary first: settled terminology
    in `current/glossary.md` governs the words used for the rest of the
    interview and for anything captured during it. Read `.grimore.toml` for
-   the project's configured paths (components dir, specs dir); with no
-   config, fall back to the defaults, `docs/components/` and `docs/specs/`.
+   paths AND the enabled component types (`types` key; when absent, all
+   six types are enabled); with no config, fall back to the defaults,
+   `docs/components/` and `docs/specs/`.
 
 2. **Interview.** Ask one question at a time - never a wall of questions in
    a single message. Prefer multiple-choice (2-4 concrete options,
@@ -84,6 +85,13 @@ interrupted after a decision but before a batch pass loses the decision.
 Note components are deliberately absent from this table - subsystem
 facts are captured by finish-docs at branch finish, not during
 alignment.
+
+If a crystallization moment calls for a component type the project has
+not enabled, do not create the file - grim rejects components of
+disabled types. Record the decision in the spec body instead (the
+Decisions section for ADR-bar decisions, the relevant prose section
+otherwise), tell the user the type is disabled, and move on. Only
+enabled types are captured as components.
 
 Decisions below the ADR bar (reversible, unsurprising, no trade-off) go
 in the spec body only - do not mint components for them.
