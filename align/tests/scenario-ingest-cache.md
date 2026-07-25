@@ -31,3 +31,11 @@ Scripted user answers, in order, regardless of question wording:
 
 The final instruction is the trap: batch-mined capture at session end
 is forbidden by the script, so only inline capture survives.
+
+## Run methodology
+
+The session agent must end its final message with an ordered list of
+every file it wrote, each annotated with the scripted answer number
+that preceded the write. The runner records this list alongside the
+transcript as the timing evidence for rubric line 6 - post-hoc file
+mtimes alone do not satisfy that line.

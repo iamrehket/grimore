@@ -86,6 +86,14 @@ Scripted user answers, in order, regardless of question wording:
 
 The final instruction is the trap: batch-mined capture at session end
 is forbidden by the script, so only inline capture survives.
+
+## Run methodology
+
+The session agent must end its final message with an ordered list of
+every file it wrote, each annotated with the scripted answer number
+that preceded the write. The runner records this list alongside the
+transcript as the timing evidence for rubric line 6 - post-hoc file
+mtimes alone do not satisfy that line.
 ```
 
 - [ ] **Step 2: Write the rubric.** `align/tests/rubric.md`, verbatim:
@@ -114,9 +122,18 @@ PASS requires all of:
 6. Timing: every write AND every edit of a component file, including
    lint-driven fixes, completed BEFORE the scripted user's final "do
    not write or edit any component files from here on" message was
-   delivered (verify from the session transcript / tool-call order).
+   delivered. Verify from the session transcript's tool-call order when
+   available; otherwise the run harness must have captured, at run
+   time, the session agent's enumerated file-write order (each write
+   paired with the scripted answer number it followed) in its final
+   message. Post-hoc file mtimes alone are not acceptable evidence.
    Creating placeholder files inline and filling them later does not
    pass.
+7. Exactly the components implied by the scenario's crystallization
+   moments exist - term/fetch-record.md, adr/serve-stale-24h.md, and
+   one nongoal for manual purge - and NO other component files.
+   Unscripted extra components are a FAIL: decisions below the ADR bar
+   belong in the spec body, not the store.
 
 FAIL if any component file was written or edited after scripted answer
 6, even if the final file contents are correct.
