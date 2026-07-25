@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import fnmatch
 import hashlib
 import json
 import re
@@ -457,6 +458,62 @@ def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool)
     return out
 
 
+def _glob_hit(path: str, globs: list) -> bool:
+    for g in globs:
+        if g.endswith("/"):
+            if path.startswith(g):
+                return True
+        elif fnmatch.fnmatchcase(path, g):
+            # fnmatchcase, not fnmatch: no platform-dependent case folding.
+            return True
+    return False
+
+
+def check_touched_paths(store: Store, cfg: Config, base: str | None, strict: bool) -> list[Finding]:
+    out: list[Finding] = []
+    gating = [
+        c for c in store.components
+        if c.status == "current"
+        and isinstance(c.cid, str)
+        and c.ctype in PATHS_TYPES
+        and isinstance(c.fm.get("paths"), list)
+        and c.fm["paths"]
+        and all(isinstance(g, str) for g in c.fm["paths"])
+        # anything shaped otherwise is already E018/E019 territory in check_schema
+    ]
+    if base is None or not gating:
+        return out
+    top = _git(cfg, "rev-parse", "--show-toplevel")
+    diff = _git(cfg, "diff", "--name-only", "-z", base)
+    if top.returncode != 0 or diff.returncode != 0:
+        # Do not silently skip: in CI a skipped guard is a bypassed guard.
+        if strict:
+            return [error("E072", ".", "touched-path guard could not compute the branch diff; failing closed")]
+        return [warning("W072", ".", "touched-path guard could not compute the branch diff; skipping")]
+    git_root = Path(top.stdout.strip()).resolve()
+    touched = {name for name in diff.stdout.split("\0") if name}
+    waivers = collect_waivers(cfg, base)
+    for c in gating:
+        own = c.path.resolve().relative_to(git_root).as_posix()
+        hits = sorted(p for p in touched if _glob_hit(p, c.fm["paths"]))
+        if not hits or own in touched:
+            continue
+        if c.cid in waivers:
+            reasons = "; ".join(waivers[c.cid])
+            out.append(warning(
+                "W071", c.rel,
+                f"touched-path hit on {hits[0]!r} waived: {reasons}", c.cid,
+            ))
+        else:
+            out.append(error(
+                "E070", c.rel,
+                f"branch touches {hits[0]!r}, declared in this component's paths:, "
+                f"without changing the component; update it or record a waiver with "
+                f"commit trailer 'Grim-Waive: {c.cid} <reason>'", c.cid,
+            ))
+    return out
+
+
 def check_avoid_terms(store: Store) -> list[Finding]:
     out: list[Finding] = []
     avoid: dict[str, str] = {}  # lowercased term -> defining component id
@@ -702,6 +759,7 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     base, mb_findings = resolve_merge_base(cfg, strict)
     findings += mb_findings
     findings += check_transitions(store, cfg, base, strict)
+    findings += check_touched_paths(store, cfg, base, strict)
     findings += check_avoid_terms(store)
     findings += check_plans(cfg)
     fixed = apply_fixes(store, findings) if fix else []
