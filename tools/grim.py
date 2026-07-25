@@ -662,6 +662,68 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     return LintResult(findings=findings, fixed=fixed)
 
 
+def write_render(cfg: Config, rendered: dict[str, str]) -> tuple[list[str], list[str]]:
+    written: list[str] = []
+    removed: list[str] = []
+    for name in rendered:
+        # Belt and suspenders: the lint gate (E062) already rejects
+        # path-hostile subsystems; refuse to write outside cfg.current
+        # even if a future caller skips the gate.
+        if "/" in name or "\\" in name or name.startswith("."):
+            raise ValueError(f"unsafe render output name {name!r}")
+    if rendered:
+        cfg.current.mkdir(parents=True, exist_ok=True)
+    for name in sorted(rendered):
+        path = cfg.current / name
+        if not path.is_file() or path.read_text(encoding="utf-8") != rendered[name]:
+            path.write_text(rendered[name], encoding="utf-8")
+            written.append(path.relative_to(cfg.root).as_posix())
+    if cfg.current.is_dir():
+        for path in sorted(cfg.current.glob("*.md")):
+            if path.name not in rendered:
+                path.unlink()
+                removed.append(path.relative_to(cfg.root).as_posix())
+    return written, removed
+
+
+@dataclasses.dataclass
+class RenderResult:
+    written: list[str]
+    removed: list[str]
+    findings: list[Finding]
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if any(f.level == "error" for f in self.findings) else 0
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "ok": self.exit_code == 0,
+                "written": self.written,
+                "removed": self.removed,
+                "errors": [
+                    dataclasses.asdict(f) for f in self.findings if f.level == "error"
+                ],
+                "warnings": [
+                    dataclasses.asdict(f) for f in self.findings if f.level == "warning"
+                ],
+            },
+            indent=2,
+        )
+
+
+def run_render(root: Path) -> RenderResult:
+    root = root.resolve()
+    lint = run_lint(root, fix=False, strict=False)
+    if lint.errors:
+        return RenderResult(written=[], removed=[], findings=lint.findings)
+    cfg = load_config(root)
+    store = load_store(cfg)
+    written, removed = write_render(cfg, render_store(store))
+    return RenderResult(written=written, removed=removed, findings=lint.findings)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="grim", description="doc-components tooling")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -675,25 +737,48 @@ def main(argv: list[str] | None = None) -> int:
     lint_p.add_argument(
         "--root", type=Path, default=Path.cwd(), help="project root (default: cwd)"
     )
+    render_p = sub.add_parser("render", help="compile docs/current/ from current components")
+    render_p.add_argument("--json", action="store_true", help="machine-readable output")
+    render_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
     args = parser.parse_args(argv)
     try:
-        result = run_lint(args.root, fix=args.fix, strict=args.strict)
+        if args.verb == "lint":
+            result = run_lint(args.root, fix=args.fix, strict=args.strict)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.findings:
+                    location = f.path + (f" [{f.component}]" if f.component else "")
+                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                for rel in result.fixed:
+                    print(f"FIXED {rel}")
+                summary = f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)"
+                if result.fixed:
+                    summary += f", {len(result.fixed)} file(s) fixed"
+                print(summary)
+            return result.exit_code
+        elif args.verb == "render":
+            result = run_render(args.root)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.findings:
+                    if f.level == "error":
+                        location = f.path + (f" [{f.component}]" if f.component else "")
+                        print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                if result.exit_code != 0:
+                    print("render refused: fix lint errors first")
+                else:
+                    for rel in result.written:
+                        print(f"RENDERED {rel}")
+                    for rel in result.removed:
+                        print(f"REMOVED {rel}")
+                    summary = f"{len(result.written)} file(s) written, {len(result.removed)} removed"
+                    print(summary)
+            return result.exit_code
     except ConfigError as exc:
         print(f"grim: {exc}", file=sys.stderr)
         return 2
-    if args.json:
-        print(result.to_json())
-    else:
-        for f in result.findings:
-            location = f.path + (f" [{f.component}]" if f.component else "")
-            print(f"{f.level.upper()} {f.code} {location}: {f.message}")
-        for rel in result.fixed:
-            print(f"FIXED {rel}")
-        summary = f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)"
-        if result.fixed:
-            summary += f", {len(result.fixed)} file(s) fixed"
-        print(summary)
-    return result.exit_code
 
 
 if __name__ == "__main__":

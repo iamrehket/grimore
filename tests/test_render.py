@@ -76,3 +76,66 @@ def test_render_is_deterministic(tmp_path):
     write_component(tmp_path, "adr", "why")
     write_component(tmp_path, "note", "n", extra={"subsystem": "renderer"})
     assert render(tmp_path) == render(tmp_path)  # byte-identical for identical stores
+
+
+def test_write_render_writes_and_prunes(tmp_path):
+    write_component(tmp_path, "adr", "why")
+    cfg, store = load(tmp_path)
+    stale = tmp_path / "docs" / "current" / "stale.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old\n")
+    keepme = tmp_path / "docs" / "current" / "notes.txt"
+    keepme.write_text("not markdown; renderer must leave it alone\n")
+    written, removed = grim.write_render(cfg, grim.render_store(store))
+    assert written == ["docs/current/decisions.md"]
+    assert removed == ["docs/current/stale.md"]
+    assert keepme.exists() and not stale.exists()
+
+
+def test_write_render_is_idempotent(tmp_path):
+    write_component(tmp_path, "adr", "why")
+    cfg, store = load(tmp_path)
+    grim.write_render(cfg, grim.render_store(store))
+    written, removed = grim.write_render(cfg, grim.render_store(store))
+    assert written == [] and removed == []
+
+
+def test_run_render_refuses_invalid_store(tmp_path):
+    # Lint gate: a store with errors must produce zero filesystem changes.
+    write_component(tmp_path, "adr", "good")
+    write_component(tmp_path, "note", "evil", extra={"subsystem": "../../escape"})
+    result = grim.run_render(tmp_path)
+    assert result.exit_code == 1
+    assert result.written == [] and result.removed == []
+    assert "E062" in [f.code for f in result.findings]
+    assert not (tmp_path / "docs" / "current").exists()  # nothing written at all
+
+
+def test_run_render_refusal_does_not_prune(tmp_path):
+    # A previously valid render must survive the store turning invalid.
+    write_component(tmp_path, "adr", "why")
+    grim.run_render(tmp_path)
+    assert (tmp_path / "docs" / "current" / "decisions.md").exists()
+    write_component(tmp_path, "note", "broken", raw_fm="id: [unclosed")
+    result = grim.run_render(tmp_path)
+    assert result.exit_code == 1
+    assert (tmp_path / "docs" / "current" / "decisions.md").exists()  # untouched
+
+
+def test_render_never_touches_external_current_dir(tmp_path):
+    # A current: configured outside the project root must die at load_config
+    # (Task 1 validation) before write_render can write or prune anything there.
+    import pytest
+    project = tmp_path / "project"
+    project.mkdir()
+    write_component(project, "adr", "why")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "innocent.md").write_text("do not prune me\n")
+    (project / ".grimore.toml").write_text(
+        f'[grimore]\ncurrent = "{victim.as_posix()}"\n'
+    )
+    with pytest.raises(grim.ConfigError):
+        grim.run_render(project)
+    assert (victim / "innocent.md").exists()
+    assert list(victim.iterdir()) == [victim / "innocent.md"]  # nothing written either
