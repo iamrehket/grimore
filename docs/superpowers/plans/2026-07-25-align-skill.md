@@ -215,40 +215,28 @@ Procedure per capture:
    skill never writes current, never promotes, never edits an existing
    non-draft component. date: today in ISO YYYY-MM-DD. Slug: lowercase
    [a-z0-9-], the filename is the slug, id is <type>-<slug> (SCHEMA.md
-   governs). Draw the slug from the shortest phrase the user themselves
-   used for the concept - no added qualifiers, version markers, or
-   descriptive elaboration of your own; a terser slug that echoes their
-   own wording beats a fuller paraphrase. In particular, do not append a
-   category label of your own coinage ("window", "policy", "limit",
-   "threshold", "config", "setting" and the like) unless the user used
-   that literal word - the user's sentence already contains a verb, an
-   adjective, and often a number that together name the thing; combine
-   all of them, in the order the user used them, instead of re-describing
-   the idea or dropping the verb down to just the adjective and number (a
-   rule settled as "let it run degraded for up to 6 hours before
-   restarting" slugs as run-degraded-6h, not degraded-6h or
-   restart-interval-limit). Two similar redundancies to drop even though
-   the user said them: release/scope qualifiers ("v1", "for now", "at
-   first", "in this release") - status: draft already marks the decision
-   as scoped-for-now, so the slug needn't repeat it (a rule scoped as
-   "defaults to synchronous mode for v1" slugs as defaults-synchronous,
-   not defaults-synchronous-v1) - and, for a nongoal specifically, a
-   leading negation word ("no", "not", "won't", "no longer") - the type
-   itself already says this is excluded, so name the slug after the
-   excluded thing, not the negation (a nongoal stated as "we won't
-   support bulk export" slugs as bulk-export, not no-bulk-export). When a
-   word sits glued directly to the number as a quantity phrase ("24h
-   old", "5 minutes stale"), that word is stating an amount, not naming
-   the concept - it answers "how much", not "what is this called". Look
-   the rest of the same answer for the word the user actually uses to
-   name the state on its own, with no number attached (often echoing a
-   label they opened with, "Freshness: ..." or "Staleness: ..."), and put
-   that standalone naming word in the slug instead, still ordered
-   verb-adjective-number (an answer opened "Freshness: keep results for
-   up to 5 minutes old, then recompute - we're fine with fresh-enough
-   data for that long" slugs as keep-fresh-5m, not keep-old-5m - "old" is
-   the quantity phrase glued to "5 minutes", "fresh" is the standalone
-   naming word and also echoes the opening label).
+   governs). Build the slug from the words the user used when the
+   decision settled:
+   - Their own nouns and verbs, not your paraphrase - the words already
+     spoken are the identity; don't re-describe the idea.
+   - Name the decision, not its category: never append an invented
+     classifier noun the user didn't say ("window", "policy", "limit",
+     "mode", "config" and the like).
+   - Keep it short - 2 to 4 words. Drop scope/release qualifiers ("v1",
+     "for now", "at first") and negation particles ("no", "not",
+     "won't") even when the user said them: status: draft already
+     scopes the decision, and a nongoal's type already signals the
+     exclusion, so restating either in the slug is redundant.
+   - When the user gives both a measurement and a name for the state,
+     the name wins - use it, with the measurement following, not a
+     measurement-only slug.
+
+   For example: "we'll use exponential backoff instead of a fixed delay
+   for retries" slugs as exponential-backoff-retries (their own terms,
+   no invented category noun); "let it run degraded for up to 6 hours
+   before restarting" slugs as run-degraded-6h (the name "degraded" plus
+   the measurement "6h" that follows it, not degraded-mode-6h or
+   6h-degraded-window).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
 3. Announce it in one line: "captured adr-slug-ids (draft)". Also keep a
