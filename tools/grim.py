@@ -331,8 +331,7 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
-    out: list[Finding] = []
+def resolve_merge_base(cfg: Config, strict: bool) -> tuple[str | None, list[Finding]]:
     top = _git(cfg, "rev-parse", "--show-toplevel")
     refs_tried = [cfg.default_branch, f"origin/{cfg.default_branch}"]
     base = None
@@ -342,24 +341,20 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
             if mb.returncode == 0:
                 base = mb.stdout.strip()
                 break
+    if base is not None:
+        return base, []
+    if not cfg.components.is_dir():
+        return None, []
+    if strict:
+        return None, [error("E042", ".", f"cannot resolve git merge-base with any of {refs_tried}; failing closed (fix CI: fetch-depth: 0)")]
+    return None, [warning("W042", ".", f"cannot resolve git merge-base with any of {refs_tried}; skipping transition and touched-path checks")]
+
+
+def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool) -> list[Finding]:
+    out: list[Finding] = []
     if base is None:
-        if not cfg.components.is_dir():
-            return out  # nothing on disk and no history to compare against
-        if strict:
-            return [
-                error(
-                    "E042", ".",
-                    f"cannot resolve git merge-base with any of {refs_tried}; "
-                    "failing closed (fix CI: fetch-depth: 0)",
-                )
-            ]
-        return [
-            warning(
-                "W042", ".",
-                f"cannot resolve git merge-base with any of {refs_tried}; "
-                "skipping transition check",
-            )
-        ]
+        return out
+    top = _git(cfg, "rev-parse", "--show-toplevel")
     git_root = Path(top.stdout.strip()).resolve()
     try:
         comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
@@ -681,7 +676,9 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     findings += check_schema(store, cfg)
     findings += check_ids(store)
     findings += check_edges(store)
-    findings += check_transitions(store, cfg, strict)
+    base, mb_findings = resolve_merge_base(cfg, strict)
+    findings += mb_findings
+    findings += check_transitions(store, cfg, base, strict)
     findings += check_avoid_terms(store)
     findings += check_plans(cfg)
     fixed = apply_fixes(store, findings) if fix else []

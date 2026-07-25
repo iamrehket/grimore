@@ -26,7 +26,8 @@ def commit_all(root, msg):
 def transitions(root, strict=False):
     cfg = grim.load_config(root)
     store = grim.load_store(cfg)
-    return grim.check_transitions(store, cfg, strict)
+    base, findings = grim.resolve_merge_base(cfg, strict)
+    return findings + grim.check_transitions(store, cfg, base, strict)
 
 
 def codes(findings):
