@@ -66,6 +66,9 @@ Frontmatter field order is not significant.
   context/decision/why; optional sections only when they add value.
 - **term** — `**Term**: one-two sentence definition.` then
   `_Avoid_: rejected synonyms.` Opinionated; context-specific terms only.
+  Lint enforces Avoid-terms from `current` terms against draft and current
+  component bodies (word-boundary, case-insensitive); append
+  `<!-- grim:ok -->` to a line to mark a deliberate mention.
 - **usecase / constraint / nongoal** — `# Title` plus one terse prose
   paragraph. Non-goals state what is excluded and why.
 - **note** — terse factual prose about one subsystem. No file paths or
