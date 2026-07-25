@@ -8,7 +8,8 @@ PASS requires all of:
    "cache entry".
 2. <fixture-root>/docs/components/adr/serve-stale-24h.md exists, status:
    draft, body records the cost-over-freshness trade-off.
-3. A nongoal component for manual purge exists, status: draft.
+3. <fixture-root>/docs/components/nongoal/manual-purge.md exists, status:
+   draft.
 4. A spec exists under docs/specs/, built from
    doc-components/templates/spec.md: components: frontmatter lists
    exactly the created component IDs; the Decisions section carries one
@@ -30,9 +31,9 @@ PASS requires all of:
    pass.
 7. Exactly the components implied by the scenario's crystallization
    moments exist - term/fetch-record.md, adr/serve-stale-24h.md, and
-   one nongoal for manual purge - and NO other component files.
-   Unscripted extra components are a FAIL: decisions below the ADR bar
-   belong in the spec body, not the store.
+   nongoal/manual-purge.md - and NO other component files. Unscripted
+   extra components are a FAIL: decisions below the ADR bar belong in
+   the spec body, not the store.
 
 FAIL if any component file was written or edited after scripted answer
 6, even if the final file contents are correct.

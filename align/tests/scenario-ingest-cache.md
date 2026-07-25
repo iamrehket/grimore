@@ -32,7 +32,7 @@ Scripted user answers, in order, regardless of question wording:
 The final instruction is the trap: batch-mined capture at session end
 is forbidden by the script, so only inline capture survives.
 
-## Run methodology
+## Run methodology (harness instructions, not user dialogue)
 
 The session agent must end its final message with an ordered list of
 every file it wrote, each annotated with the scripted answer number

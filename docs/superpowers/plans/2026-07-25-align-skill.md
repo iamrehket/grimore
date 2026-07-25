@@ -87,7 +87,7 @@ Scripted user answers, in order, regardless of question wording:
 The final instruction is the trap: batch-mined capture at session end
 is forbidden by the script, so only inline capture survives.
 
-## Run methodology
+## Run methodology (harness instructions, not user dialogue)
 
 The session agent must end its final message with an ordered list of
 every file it wrote, each annotated with the scripted answer number
@@ -109,7 +109,8 @@ PASS requires all of:
    "cache entry".
 2. <fixture-root>/docs/components/adr/serve-stale-24h.md exists, status:
    draft, body records the cost-over-freshness trade-off.
-3. A nongoal component for manual purge exists, status: draft.
+3. <fixture-root>/docs/components/nongoal/manual-purge.md exists, status:
+   draft.
 4. A spec exists under docs/specs/, built from
    doc-components/templates/spec.md: components: frontmatter lists
    exactly the created component IDs; the Decisions section carries one
@@ -131,9 +132,9 @@ PASS requires all of:
    pass.
 7. Exactly the components implied by the scenario's crystallization
    moments exist - term/fetch-record.md, adr/serve-stale-24h.md, and
-   one nongoal for manual purge - and NO other component files.
-   Unscripted extra components are a FAIL: decisions below the ADR bar
-   belong in the spec body, not the store.
+   nongoal/manual-purge.md - and NO other component files. Unscripted
+   extra components are a FAIL: decisions below the ADR bar belong in
+   the spec body, not the store.
 
 FAIL if any component file was written or edited after scripted answer
 6, even if the final file contents are correct.
@@ -245,11 +246,11 @@ git commit -m "IAM-39: align skill - interview with inline component capture"
 
 - [ ] **Step 2: Dispatch the subagent WITH the skill.** Same scenario, same scripted answers, same model tier as the RED run — the only variable that changes is the presence of `align/SKILL.md` as its process instructions.
 
-- [ ] **Step 3: Score against the rubric.** All six rubric lines, including the timing line (inspect the transcript's tool-call order: every component write and edit precedes scripted answer 6). Run `uv run tools/grim.py lint --root <fixture-root>` from the grimore checkout for rubric line 5.
+- [ ] **Step 3: Score against the rubric.** All seven rubric lines, including the timing line (line 6: accept either the session transcript's tool-call order when available, or otherwise the run-harness-captured answer-annotated file-write list per the scenario's Run methodology section — either way, confirm every component write and edit precedes scripted answer 6) and the exactly-three-components line (line 7: no components beyond term/fetch-record.md, adr/serve-stale-24h.md, and nongoal/manual-purge.md). Run `uv run tools/grim.py lint --root <fixture-root>` from the grimore checkout for rubric line 5.
 
 - [ ] **Step 4: If any line fails, fix the SKILL and re-run.** The scenario and rubric are frozen; only the skill text changes. Common expected failure modes and their fixes: components written but not announced (strengthen procedure step 3), capture deferred to spec-writing time (move the trigger table earlier and make the "before the next question" rule bold), Avoid-line missing (the term template's `_Avoid_:` line must be called out as mandatory when a synonym was explicitly rejected). Repeat until PASS.
 
-- [ ] **Step 5: Record the result.** `align/tests/result-green.md`: date, run count, which failure modes appeared and what skill text change fixed each (this is the skill's regression history; future editors re-run the scenario after edits), plus a compact tool-call timeline extracted from the passing run — one line per component write/edit and per scripted answer, in order — so the inline-capture timing verdict stays independently auditable without the full transcript. Under 60 lines.
+- [ ] **Step 5: Record the result.** `align/tests/result-green.md`: date, run count, which failure modes appeared and what skill text change fixed each (this is the skill's regression history; future editors re-run the scenario after edits), plus the answer-annotated file-write list required by the scenario's Run methodology section — one line per component write/edit, each tagged with the scripted answer number it followed, in order — so the inline-capture timing verdict stays independently auditable without the full transcript. Under 60 lines.
 
 - [ ] **Step 6: Commit**
 

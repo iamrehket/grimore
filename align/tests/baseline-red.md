@@ -12,17 +12,18 @@ capture.
 1. PASS - term/fetch-record.md valid, draft, correct body.
 2. FAIL - wrote adr/fetch-record-staleness-window.md, not
    adr/serve-stale-24h.md. Content right, ID wrong.
-3. PASS - nongoal/cache-invalidation-api.md, draft, on-topic.
+3. FAIL - wrote nongoal/cache-invalidation-api.md, not
+   nongoal/manual-purge.md. Content right, ID wrong.
 4. PASS - spec components match created IDs; Decisions indexes all 5
    without restating content.
 5. PASS - `uv run tools/grim.py lint --root <fixture>`: 0 errors.
-6. INSUFFICIENT - amended line needs the run's own final message to
-   pair each write with its answer number; this run gave a separate
-   file list plus narrative instead. Mtimes no longer qualify alone.
+6. FAIL (evidence absent) - amended line needs the run's own final
+   message to pair each write with its answer number; this run gave a
+   separate file list plus narrative instead. Mtimes no longer count.
 7. FAIL (new) - 2 unscripted extras: constraint/cost-over-latency.md,
    adr/shared-fetch-record-store.md. Only 3 were scripted.
 
 ## Verdict: FAIL (rubric requires all 7)
 
-Lines 2, 6, 7 now fail (was line 2 alone) - closing the gap this
+Lines 2, 3, 6, 7 now fail (was line 2 alone) - closing the gaps this
 baseline exposed: a diligent agent can nearly pass on discipline alone.
