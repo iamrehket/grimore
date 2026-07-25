@@ -2,7 +2,8 @@
 
 Wire `grim check` into an adopting project's CI. It fails on structural
 violations, on rendered output that does not byte-match a fresh render,
-and (from IAM-42 on) on unwaived touched-path guard hits.
+and on unwaived touched-path hits; waivers appear in lint output as `W071`
+warnings for reviewer visibility.
 
 ## GitHub Actions
 
