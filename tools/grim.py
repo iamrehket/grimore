@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import fnmatch
 import hashlib
 import json
 import re
@@ -331,10 +332,16 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
-    out: list[Finding] = []
+def resolve_merge_base(cfg: Config, strict: bool) -> tuple[str | None, list[Finding]]:
     top = _git(cfg, "rev-parse", "--show-toplevel")
-    refs_tried = [cfg.default_branch, f"origin/{cfg.default_branch}"]
+    # origin/<default_branch> is what the PR will actually merge into, so it
+    # is the authoritative base whenever it resolves. The local ref is only
+    # a fallback for repos with no remote (or no fetch of it yet) -- a
+    # stale or divergent local ref must never be preferred over origin, or
+    # commits/waivers that will genuinely land in the PR diff (or that sit
+    # on an upstream branch the guard has no business seeing) get excluded
+    # or wrongly included.
+    refs_tried = [f"origin/{cfg.default_branch}", cfg.default_branch]
     base = None
     if top.returncode == 0:
         for ref in refs_tried:
@@ -342,24 +349,43 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
             if mb.returncode == 0:
                 base = mb.stdout.strip()
                 break
+    if base is not None:
+        return base, []
+    if not cfg.components.is_dir():
+        return None, []
+    if strict:
+        return None, [error("E042", ".", f"cannot resolve git merge-base with any of {refs_tried}; failing closed (fix CI: fetch-depth: 0)")]
+    return None, [warning("W042", ".", f"cannot resolve git merge-base with any of {refs_tried}; skipping transition and touched-path checks")]
+
+
+WAIVE_VALUE_RE = re.compile(r"^(\S+)\s+(\S.*?)\s*$")
+
+
+def collect_waivers(cfg: Config, base: str) -> dict[str, list[str]]:
+    # Let git identify the trailer block: %(trailers:key=...) only reads the
+    # final trailer paragraph, so a "Grim-Waive:" quoted or discussed in the
+    # commit body prose is NOT a waiver.
+    log = _git(
+        cfg, "log", "--reverse",
+        "--format=%(trailers:key=Grim-Waive,valueonly=true,unfold=true)%x00",
+        f"{base}..HEAD",
+    )
+    waivers: dict[str, list[str]] = {}
+    if log.returncode != 0:
+        return waivers
+    for block in log.stdout.split("\0"):
+        for line in block.splitlines():
+            m = WAIVE_VALUE_RE.match(line.strip())
+            if m:
+                waivers.setdefault(m.group(1), []).append(m.group(2))
+    return waivers
+
+
+def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool) -> list[Finding]:
+    out: list[Finding] = []
     if base is None:
-        if not cfg.components.is_dir():
-            return out  # nothing on disk and no history to compare against
-        if strict:
-            return [
-                error(
-                    "E042", ".",
-                    f"cannot resolve git merge-base with any of {refs_tried}; "
-                    "failing closed (fix CI: fetch-depth: 0)",
-                )
-            ]
-        return [
-            warning(
-                "W042", ".",
-                f"cannot resolve git merge-base with any of {refs_tried}; "
-                "skipping transition check",
-            )
-        ]
+        return out
+    top = _git(cfg, "rev-parse", "--show-toplevel")
     git_root = Path(top.stdout.strip()).resolve()
     try:
         comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
@@ -436,6 +462,70 @@ def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
                 c.cid,
             )
         )
+    return out
+
+
+def _glob_hit(path: str, globs: list) -> bool:
+    for g in globs:
+        if g.endswith("/"):
+            if path.startswith(g):
+                return True
+        elif fnmatch.fnmatchcase(path, g):
+            # fnmatchcase, not fnmatch: no platform-dependent case folding.
+            return True
+    return False
+
+
+def check_touched_paths(store: Store, cfg: Config, base: str | None, strict: bool) -> list[Finding]:
+    out: list[Finding] = []
+    gating = [
+        c for c in store.components
+        if c.status == "current"
+        and isinstance(c.cid, str)
+        and c.ctype in PATHS_TYPES
+        and isinstance(c.fm.get("paths"), list)
+        and c.fm["paths"]
+        and all(isinstance(g, str) for g in c.fm["paths"])
+        # anything shaped otherwise is already E018/E019 territory in check_schema
+    ]
+    if base is None or not gating:
+        return out
+    top = _git(cfg, "rev-parse", "--show-toplevel")
+    # --no-renames: a plain `diff --name-only` collapses a detected rename to
+    # only its destination path, so `git mv` out of a guarded paths: prefix
+    # would report zero touched paths and silently bypass the guard.
+    # -c diff.relative=false: a user-level `git config diff.relative true`
+    # would make git print paths relative to cwd instead of the repo root
+    # when cfg.root is nested under the git root, silently emptying the
+    # touched set. Override in the same invocation (git >= 2.22; avoid
+    # --no-relative, which needs 2.28).
+    diff = _git(cfg, "-c", "diff.relative=false", "diff", "--no-renames", "--name-only", "-z", base)
+    if top.returncode != 0 or diff.returncode != 0:
+        # Do not silently skip: in CI a skipped guard is a bypassed guard.
+        if strict:
+            return [error("E072", ".", "touched-path guard could not compute the branch diff; failing closed")]
+        return [warning("W072", ".", "touched-path guard could not compute the branch diff; skipping")]
+    git_root = Path(top.stdout.strip()).resolve()
+    touched = {name for name in diff.stdout.split("\0") if name}
+    waivers = collect_waivers(cfg, base)
+    for c in gating:
+        own = c.path.resolve().relative_to(git_root).as_posix()
+        hits = sorted(p for p in touched if _glob_hit(p, c.fm["paths"]))
+        if not hits or own in touched:
+            continue
+        if c.cid in waivers:
+            reasons = "; ".join(waivers[c.cid])
+            out.append(warning(
+                "W071", c.rel,
+                f"touched-path hit on {hits[0]!r} waived: {reasons}", c.cid,
+            ))
+        else:
+            out.append(error(
+                "E070", c.rel,
+                f"branch touches {hits[0]!r}, declared in this component's paths:, "
+                f"without changing the component; update it or record a waiver with "
+                f"commit trailer 'Grim-Waive: {c.cid} <reason>'", c.cid,
+            ))
     return out
 
 
@@ -681,7 +771,10 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     findings += check_schema(store, cfg)
     findings += check_ids(store)
     findings += check_edges(store)
-    findings += check_transitions(store, cfg, strict)
+    base, mb_findings = resolve_merge_base(cfg, strict)
+    findings += mb_findings
+    findings += check_transitions(store, cfg, base, strict)
+    findings += check_touched_paths(store, cfg, base, strict)
     findings += check_avoid_terms(store)
     findings += check_plans(cfg)
     fixed = apply_fixes(store, findings) if fix else []

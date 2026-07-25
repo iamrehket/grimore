@@ -35,7 +35,7 @@ Defaults; an adopting project overrides paths in `.grimore.toml`.
 | `status` | yes | `draft`, `current`, or `superseded` |
 | `supersedes` | no | list of component IDs this replaces; every target must exist in the store |
 | `subsystem` | no | routes `note` into a render target |
-| `paths` | no | `note`/`adr` only; list of path globs the component describes; drives the touched-path guard |
+| `paths` | no | `note`/`adr` only; list of git-root-relative path globs the component describes; a trailing `/` matches the directory prefix, otherwise case-sensitive fnmatch, where `*` matches across `/`. Drives the touched-path guard: a branch that touches a matching path must change this component or record a `Grim-Waive: <id> <reason>` commit trailer (the trailer must sit in the commit's trailer block, and the reason is mandatory). Example: write `src/render/`, not `src/render` - without the trailing slash the pattern matches only a file literally named `src/render` and gates nothing. |
 | `date` | yes | ISO `YYYY-MM-DD` creation date; never updated |
 
 Frontmatter field order is not significant.
@@ -58,6 +58,10 @@ Frontmatter field order is not significant.
 - Supersede targets must already exist in the branch's view of the store;
   reversing a decision in an unmerged sibling branch requires landing
   order.
+
+### Touched-path guard
+
+Only `current` components gate. The guard sees tracked changes vs the merge-base. Waivers are echoed in lint output (`W071`) so reviewers see every bypass. Coverage grows as `paths:` get declared. A waiver covers its component for the remainder of the branch (the whole merge-base..HEAD range), not just the change it was written for - if the branch grows after a waiver lands, re-review it.
 
 ## Body formats
 
