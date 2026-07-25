@@ -220,23 +220,26 @@ Procedure per capture:
    - Their own nouns and verbs, not your paraphrase - the words already
      spoken are the identity; don't re-describe the idea.
    - Name the decision, not its category: never append an invented
-     classifier noun the user didn't say ("window", "policy", "limit",
-     "mode", "config" and the like).
+     classifier noun the user didn't say.
    - Keep it short - 2 to 4 words. Drop scope/release qualifiers ("v1",
      "for now", "at first") and negation particles ("no", "not",
      "won't") even when the user said them: status: draft already
      scopes the decision, and a nongoal's type already signals the
      exclusion, so restating either in the slug is redundant.
-   - When the user gives both a measurement and a name for the state,
-     the name wins - use it, with the measurement following, not a
-     measurement-only slug.
+   - When the decision comes with an action, a name for the state, and a
+     measurement, keep all three, in that order (action-name-measurement)
+     - never drop to name+measurement alone, and never drop to the
+     measurement alone.
+   - When the user offers both a generic descriptive phrase and a more
+     specific, precise term for the same idea, use the specific term -
+     it's what they're committing to, not just describing.
 
    For example: "we'll use exponential backoff instead of a fixed delay
    for retries" slugs as exponential-backoff-retries (their own terms,
    no invented category noun); "let it run degraded for up to 6 hours
-   before restarting" slugs as run-degraded-6h (the name "degraded" plus
-   the measurement "6h" that follows it, not degraded-mode-6h or
-   6h-degraded-window).
+   before restarting" slugs as run-degraded-6h (the action "run", the
+   name "degraded", and the measurement "6h", not a category coinage
+   like run-degraded-tier).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
 3. Announce it in one line: "captured adr-slug-ids (draft)". Also keep a
