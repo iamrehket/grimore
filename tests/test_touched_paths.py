@@ -292,3 +292,28 @@ def test_diff_failure_warns_locally(tmp_path, monkeypatch):
     result = grim.run_lint(tmp_path, strict=False)
     codes = [f.code for f in result.findings]
     assert "W072" in codes and "E070" not in codes and "E072" not in codes
+
+
+def test_stale_local_default_branch_does_not_expand_waiver_range(tmp_path):
+    # Upstream main advances with a waived change; the clone's local main is
+    # stale. The guard must base on origin/main, so the upstream waiver
+    # cannot cover the feature branch's own unwaived hit.
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    make_repo(upstream)
+    write_component(upstream, "note", "renderer", extra={"paths": "[src/render/]"})
+    src = upstream / "src" / "render"
+    src.mkdir(parents=True)
+    (src / "x.py").write_text("x = 1\n")
+    commit_all(upstream, "baseline")
+    (src / "x.py").write_text("x = 2\n")
+    write_component(upstream, "note", "renderer", body="Updated for the tweak.", extra={"paths": "[src/render/]"})
+    commit_all(upstream, "upstream tweak with component update\n\nGrim-Waive: note-renderer upstream-only reason")
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", str(upstream), str(clone))
+    git(clone, "checkout", "-b", "feature")
+    git(clone, "branch", "-f", "main", "origin/main~1")  # stale local main
+    (clone / "src" / "render" / "x.py").write_text("x = 3\n")
+    commit_all(clone, "feature tweak, no waiver")
+    codes = lint_codes(clone)
+    assert "E070" in codes and "W071" not in codes
