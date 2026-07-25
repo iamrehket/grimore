@@ -193,12 +193,62 @@ interrupted after a decision but before a batch pass loses the decision.
 Decisions below the ADR bar (reversible, unsurprising, no trade-off) go
 in the spec body only - do not mint components for them.
 
+Capture fires only on the user's own explicit crystallization moment - a
+trigger row lights up when the user states the decision (and, for an adr,
+its trade-off) as settled, in their own words. Do not mint a component
+because you judge something decision-worthy while proposing options or
+explaining your own recommendation: a purpose or motivation statement
+alone does not confirm a usecase - wait for an explicit actor-plus-action
+requirement, confirmed during the interview itself, not read off the
+session's opening request. The request that opens the session is the
+problem statement (why now, what hurts) and belongs in the spec's Problem
+section even where it names a capability in passing - it is framing, not
+a crystallization moment, so it never by itself mints a usecase.
+Recommending or picking an approach in the Approaches step likewise does
+not by itself clear the adr bar - that choice belongs in the spec's
+Approach section by default, and only additionally becomes a component if
+the user calls out one specific facet of it as its own settled,
+hard-to-reverse trade-off, distinct from picking the approach.
+
 Procedure per capture:
 1. Copy the template; fill every field. status: draft always - this
    skill never writes current, never promotes, never edits an existing
    non-draft component. date: today in ISO YYYY-MM-DD. Slug: lowercase
    [a-z0-9-], the filename is the slug, id is <type>-<slug> (SCHEMA.md
-   governs).
+   governs). Draw the slug from the shortest phrase the user themselves
+   used for the concept - no added qualifiers, version markers, or
+   descriptive elaboration of your own; a terser slug that echoes their
+   own wording beats a fuller paraphrase. In particular, do not append a
+   category label of your own coinage ("window", "policy", "limit",
+   "threshold", "config", "setting" and the like) unless the user used
+   that literal word - the user's sentence already contains a verb, an
+   adjective, and often a number that together name the thing; combine
+   all of them, in the order the user used them, instead of re-describing
+   the idea or dropping the verb down to just the adjective and number (a
+   rule settled as "let it run degraded for up to 6 hours before
+   restarting" slugs as run-degraded-6h, not degraded-6h or
+   restart-interval-limit). Two similar redundancies to drop even though
+   the user said them: release/scope qualifiers ("v1", "for now", "at
+   first", "in this release") - status: draft already marks the decision
+   as scoped-for-now, so the slug needn't repeat it (a rule scoped as
+   "defaults to synchronous mode for v1" slugs as defaults-synchronous,
+   not defaults-synchronous-v1) - and, for a nongoal specifically, a
+   leading negation word ("no", "not", "won't", "no longer") - the type
+   itself already says this is excluded, so name the slug after the
+   excluded thing, not the negation (a nongoal stated as "we won't
+   support bulk export" slugs as bulk-export, not no-bulk-export). When a
+   word sits glued directly to the number as a quantity phrase ("24h
+   old", "5 minutes stale"), that word is stating an amount, not naming
+   the concept - it answers "how much", not "what is this called". Look
+   the rest of the same answer for the word the user actually uses to
+   name the state on its own, with no number attached (often echoing a
+   label they opened with, "Freshness: ..." or "Staleness: ..."), and put
+   that standalone naming word in the slug instead, still ordered
+   verb-adjective-number (an answer opened "Freshness: keep results for
+   up to 5 minutes old, then recompute - we're fine with fresh-enough
+   data for that long" slugs as keep-fresh-5m, not keep-old-5m - "old" is
+   the quantity phrase glued to "5 minutes", "fresh" is the standalone
+   naming word and also echoes the opening label).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
 3. Announce it in one line: "captured adr-slug-ids (draft)". Also keep a
