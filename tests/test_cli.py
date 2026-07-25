@@ -75,3 +75,20 @@ def test_cli_human_output_has_summary(tmp_path):
     r = run_cli("lint", "--root", str(tmp_path), cwd=tmp_path)
     assert r.returncode == 0
     assert "0 error(s)" in r.stdout
+
+
+def test_render_verb(tmp_path, capsys):
+    write_component(tmp_path, "adr", "why")
+    assert grim.main(["render", "--root", str(tmp_path)]) == 0
+    assert (tmp_path / "docs" / "current" / "decisions.md").exists()
+    out = capsys.readouterr().out
+    assert "decisions.md" in out
+
+
+def test_render_verb_json(tmp_path, capsys):
+    import json
+    write_component(tmp_path, "adr", "why")
+    assert grim.main(["render", "--json", "--root", str(tmp_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["written"] == ["docs/current/decisions.md"]
+    assert payload["removed"] == []

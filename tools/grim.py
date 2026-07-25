@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6"]
 # ///
-"""grim - doc-components tooling. IAM-38 ships the lint verb.
+"""grim - doc-components tooling. Ships the lint, render, and check verbs.
 
 Requirements doc: doc-components/SCHEMA.md.
 Spec: docs/superpowers/specs/2026-07-24-doc-components-design.md.
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import hashlib
 import json
 import re
 import subprocess
@@ -28,6 +29,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ESCAPE_MARKER = "<!-- grim:ok -->"
 AVOID_LINE_RE = re.compile(r"^_Avoid_:\s*(.+?)\.?\s*$")
+RESERVED_OUTPUTS = ("charter", "decisions", "glossary", "general")
 FIELD_ORDER = ("id", "type", "status", "supersedes", "subsystem", "paths", "date")
 REQUIRED_FIELDS = ("id", "type", "status", "date")
 PATHS_TYPES = {"note", "adr"}
@@ -81,12 +83,22 @@ def load_config(root: Path) -> Config:
     unknown = set(types) - set(COMPONENT_TYPES)
     if unknown:
         raise ConfigError(f".grimore.toml: unknown component types: {sorted(unknown)}")
+    resolved_root = root.resolve()
+    paths = {
+        key: root / raw.get(key, DEFAULTS[key])
+        for key in ("components", "current", "specs", "plans")
+    }
+    for key, p in paths.items():
+        if not p.resolve().is_relative_to(resolved_root):
+            raise ConfigError(
+                f".grimore.toml: {key} must resolve inside the project root, got {p}"
+            )
     return Config(
         root=root,
-        components=root / raw.get("components", DEFAULTS["components"]),
-        current=root / raw.get("current", DEFAULTS["current"]),
-        specs=root / raw.get("specs", DEFAULTS["specs"]),
-        plans=root / raw.get("plans", DEFAULTS["plans"]),
+        components=paths["components"],
+        current=paths["current"],
+        specs=paths["specs"],
+        plans=paths["plans"],
         default_branch=raw.get("default_branch", DEFAULTS["default_branch"]),
         types=types,
     )
@@ -182,7 +194,11 @@ def load_store(cfg: Config) -> Store:
                 error("E005", rel, f"unknown component type directory {parent.name!r}")
             )
             continue
-        comp, errs = parse_component(path, cfg.root)
+        try:
+            comp, errs = parse_component(path, cfg.root)
+        except UnicodeDecodeError:
+            findings.append(error("E006", rel, "file is not valid UTF-8"))
+            continue
         findings.extend(errs)
         if comp is not None:
             components.append(comp)
@@ -256,6 +272,10 @@ def check_schema(store: Store, cfg: Config) -> list[Finding]:
                 out.append(
                     warning("W061", rel, "subsystem has no effect on non-note components", cid)
                 )
+            elif not SLUG_RE.fullmatch(fm["subsystem"]):
+                out.append(error("E062", rel, f"subsystem {fm['subsystem']!r} must match [a-z0-9][a-z0-9-]*", cid))
+            elif fm["subsystem"] in RESERVED_OUTPUTS:
+                out.append(error("E063", rel, f"subsystem {fm['subsystem']!r} collides with a fixed render output", cid))
     return out
 
 
@@ -314,30 +334,39 @@ def _git(cfg: Config, *args: str) -> subprocess.CompletedProcess:
 def check_transitions(store: Store, cfg: Config, strict: bool) -> list[Finding]:
     out: list[Finding] = []
     top = _git(cfg, "rev-parse", "--show-toplevel")
-    mb = _git(cfg, "merge-base", "HEAD", cfg.default_branch)
-    if top.returncode != 0 or mb.returncode != 0:
+    refs_tried = [cfg.default_branch, f"origin/{cfg.default_branch}"]
+    base = None
+    if top.returncode == 0:
+        for ref in refs_tried:
+            mb = _git(cfg, "merge-base", "HEAD", ref)
+            if mb.returncode == 0:
+                base = mb.stdout.strip()
+                break
+    if base is None:
         if not cfg.components.is_dir():
             return out  # nothing on disk and no history to compare against
         if strict:
             return [
                 error(
-                    "E042",
-                    ".",
-                    f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                    "E042", ".",
+                    f"cannot resolve git merge-base with any of {refs_tried}; "
                     "failing closed (fix CI: fetch-depth: 0)",
                 )
             ]
         return [
             warning(
-                "W042",
-                ".",
-                f"cannot resolve git merge-base with {cfg.default_branch!r}; "
+                "W042", ".",
+                f"cannot resolve git merge-base with any of {refs_tried}; "
                 "skipping transition check",
             )
         ]
     git_root = Path(top.stdout.strip()).resolve()
-    base = mb.stdout.strip()
-    comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
+    try:
+        comp_prefix = cfg.components.resolve().relative_to(git_root).as_posix()
+    except ValueError:
+        raise ConfigError(
+            f"components dir {cfg.components} is outside the git repository {git_root}"
+        ) from None
     ls = _git(cfg, "ls-tree", "--full-tree", "-r", "-z", "--name-only", base, "--", comp_prefix)
     if ls.returncode != 0:
         if strict:
@@ -454,7 +483,12 @@ def check_plans(cfg: Config) -> list[Finding]:
         return out
     for path in sorted(cfg.plans.rglob("*.md")):
         rel = path.relative_to(cfg.root).as_posix()
-        m = FM_RE.match(path.read_text(encoding="utf-8"))
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            out.append(warning("W060", rel, "plan is not valid UTF-8; spec: check skipped"))
+            continue
+        m = FM_RE.match(text)
         has_spec = False
         if m:
             try:
@@ -506,6 +540,28 @@ def normalize_component(c: Component) -> str:
     return "\n".join(lines) + "\n\n" + body + "\n"
 
 
+HEADING_RE = re.compile(r"^(#{1,6})(?=\s)", re.MULTILINE)
+
+
+def demote_headings(body: str, levels: int) -> str:
+    return HEADING_RE.sub(lambda m: "#" * min(6, len(m.group(1)) + levels), body)
+
+
+def store_hash(store: Store) -> str:
+    h = hashlib.sha256()
+    pairs = sorted(
+        (c.rel, normalize_component(c))
+        for c in store.components
+        if c.status == "current"
+    )
+    for rel, content in pairs:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(content.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
 def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
     fixed: list[str] = []
     error_rels = {f.path for f in findings if f.level == "error"}
@@ -514,9 +570,54 @@ def apply_fixes(store: Store, findings: list[Finding]) -> list[str]:
             continue
         new_text = normalize_component(c)
         if new_text != c.path.read_text(encoding="utf-8"):
+            if c.path.is_symlink():
+                raise ConfigError(f"{c.rel} is a symlink; refusing to render through it")
             c.path.write_text(new_text, encoding="utf-8")
             fixed.append(c.rel)
     return fixed
+
+
+CHARTER_SECTIONS = (("usecase", "Use cases"), ("constraint", "Constraints"), ("nongoal", "Non-goals"))
+
+
+def _current_sorted(store: Store, *types: str) -> list[Component]:
+    return sorted(
+        (c for c in store.components if c.status == "current" and c.ctype in types),
+        key=lambda c: (str(c.fm.get("date", "")), str(c.cid or "")),
+    )
+
+
+def render_store(store: Store) -> dict[str, str]:
+    header = [
+        f"<!-- grim:store-hash sha256:{store_hash(store)} -->",
+        "<!-- generated by grim render; do not edit -->",
+        "",
+    ]
+    out: dict[str, str] = {}
+
+    def emit(name: str, title: str, chunks: list[str]) -> None:
+        if chunks:
+            out[name] = "\n".join(header + [f"# {title}", ""] + chunks).rstrip("\n") + "\n"
+
+    def body(c: Component, levels: int) -> str:
+        return demote_headings(c.body.strip("\n"), levels) + "\n"
+
+    charter: list[str] = []
+    for ctype, heading in CHARTER_SECTIONS:
+        comps = _current_sorted(store, ctype)
+        if comps:
+            charter.append(f"## {heading}\n")
+            charter += [body(c, 2) for c in comps]
+    emit("charter.md", "Charter", charter)
+    emit("decisions.md", "Decisions", [body(c, 1) for c in _current_sorted(store, "adr")])
+    emit("glossary.md", "Glossary", [body(c, 1) for c in _current_sorted(store, "term")])
+    by_subsystem: dict[str, list[Component]] = {}
+    for c in _current_sorted(store, "note"):
+        sub = c.fm.get("subsystem")
+        by_subsystem.setdefault(sub if isinstance(sub, str) and sub else "general", []).append(c)
+    for sub, comps in sorted(by_subsystem.items()):
+        emit(f"{sub}.md", sub, [body(c, 1) for c in comps])
+    return out
 
 
 @dataclasses.dataclass
@@ -548,6 +649,30 @@ class LintResult:
         )
 
 
+@dataclasses.dataclass
+class CheckResult:
+    lint: LintResult
+    mismatches: list[Finding]
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if self.lint.errors or self.mismatches else 0
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "ok": self.exit_code == 0,
+                "errors": [dataclasses.asdict(f) for f in self.lint.errors],
+                "warnings": [dataclasses.asdict(f) for f in self.lint.warnings],
+                "mismatches": [dataclasses.asdict(f) for f in self.mismatches],
+            },
+            indent=2,
+        )
+
+
+FIX_HINT = "run: grim lint --fix && grim render, and commit the result"
+
+
 def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResult:
     root = root.resolve()
     cfg = load_config(root)
@@ -563,6 +688,103 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     return LintResult(findings=findings, fixed=fixed)
 
 
+def write_render(cfg: Config, rendered: dict[str, str]) -> tuple[list[str], list[str]]:
+    written: list[str] = []
+    removed: list[str] = []
+    for name in rendered:
+        # Belt and suspenders: the lint gate (E062) already rejects
+        # path-hostile subsystems; refuse to write outside cfg.current
+        # even if a future caller skips the gate.
+        if "/" in name or "\\" in name or name.startswith("."):
+            raise ValueError(f"unsafe render output name {name!r}")
+    if rendered:
+        cfg.current.mkdir(parents=True, exist_ok=True)
+    for name in sorted(rendered):
+        path = cfg.current / name
+        if path.is_symlink():
+            raise ConfigError(f"{path.relative_to(cfg.root).as_posix()} is a symlink; refusing to render through it")
+        content_bytes = rendered[name].encode("utf-8")
+        if not path.is_file() or path.read_bytes() != content_bytes:
+            path.write_bytes(content_bytes)
+            written.append(path.relative_to(cfg.root).as_posix())
+    if cfg.current.is_dir():
+        for path in sorted(cfg.current.glob("*.md")):
+            if path.name not in rendered:
+                path.unlink()
+                removed.append(path.relative_to(cfg.root).as_posix())
+    return written, removed
+
+
+@dataclasses.dataclass
+class RenderResult:
+    written: list[str]
+    removed: list[str]
+    findings: list[Finding]
+
+    @property
+    def exit_code(self) -> int:
+        return 1 if any(f.level == "error" for f in self.findings) else 0
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "ok": self.exit_code == 0,
+                "written": self.written,
+                "removed": self.removed,
+                "errors": [
+                    dataclasses.asdict(f) for f in self.findings if f.level == "error"
+                ],
+                "warnings": [
+                    dataclasses.asdict(f) for f in self.findings if f.level == "warning"
+                ],
+            },
+            indent=2,
+        )
+
+
+def run_render(root: Path) -> RenderResult:
+    root = root.resolve()
+    lint = run_lint(root, fix=False, strict=False)
+    if lint.errors:
+        return RenderResult(written=[], removed=[], findings=lint.findings)
+    # Re-reads disk after the gate; assumes no concurrent writer (single-user CLI).
+    cfg = load_config(root)
+    store = load_store(cfg)
+    written, removed = write_render(cfg, render_store(store))
+    return RenderResult(written=written, removed=removed, findings=lint.findings)
+
+
+def run_check(root: Path) -> CheckResult:
+    root = root.resolve()
+    cfg = load_config(root)
+    lint = run_lint(root, fix=False, strict=True)
+    if lint.errors:
+        # Don't render or byte-compare against a store we already know is
+        # broken: lint errors (e.g. a reserved-name subsystem colliding with
+        # a fixed output key, or traversal-shaped paths) can make render_store
+        # silently drop or overwrite entries, producing bogus mismatches.
+        # Lint errors alone already fail the exit code; no CI signal is lost.
+        return CheckResult(lint=lint, mismatches=[])
+    store = load_store(cfg)
+    rendered = {name: content.encode("utf-8") for name, content in render_store(store).items()}
+    committed = (
+        {p.name: p.read_bytes() for p in sorted(cfg.current.glob("*.md"))}
+        if cfg.current.is_dir()
+        else {}
+    )
+    mismatches: list[Finding] = []
+    current_rel = cfg.current.relative_to(cfg.root).as_posix()
+    for name in sorted(set(rendered) | set(committed)):
+        rel = f"{current_rel}/{name}"
+        if name not in committed:
+            mismatches.append(error("E080", rel, f"rendered file missing from {current_rel}/; {FIX_HINT}"))
+        elif name not in rendered:
+            mismatches.append(error("E080", rel, f"stale file: fresh render does not produce it; {FIX_HINT}"))
+        elif committed[name] != rendered[name]:
+            mismatches.append(error("E080", rel, f"out of date: committed bytes differ from fresh render; {FIX_HINT}"))
+    return CheckResult(lint=lint, mismatches=mismatches)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="grim", description="doc-components tooling")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -576,25 +798,75 @@ def main(argv: list[str] | None = None) -> int:
     lint_p.add_argument(
         "--root", type=Path, default=Path.cwd(), help="project root (default: cwd)"
     )
+    render_p = sub.add_parser("render", help="compile docs/current/ from current components")
+    render_p.add_argument("--json", action="store_true", help="machine-readable output")
+    render_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
+    check_p = sub.add_parser("check", help="verify committed docs/current/ matches fresh render")
+    check_p.add_argument("--json", action="store_true", help="machine-readable output")
+    check_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
     args = parser.parse_args(argv)
     try:
-        result = run_lint(args.root, fix=args.fix, strict=args.strict)
+        if args.verb == "lint":
+            result = run_lint(args.root, fix=args.fix, strict=args.strict)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.findings:
+                    location = f.path + (f" [{f.component}]" if f.component else "")
+                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                for rel in result.fixed:
+                    print(f"FIXED {rel}")
+                summary = f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)"
+                if result.fixed:
+                    summary += f", {len(result.fixed)} file(s) fixed"
+                print(summary)
+            return result.exit_code
+        elif args.verb == "render":
+            result = run_render(args.root)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.findings:
+                    if f.level == "error":
+                        location = f.path + (f" [{f.component}]" if f.component else "")
+                        print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                if result.exit_code != 0:
+                    print("render refused: fix lint errors first")
+                else:
+                    for rel in result.written:
+                        print(f"RENDERED {rel}")
+                    for rel in result.removed:
+                        print(f"REMOVED {rel}")
+                    summary = f"{len(result.written)} file(s) written, {len(result.removed)} removed"
+                    print(summary)
+            return result.exit_code
+        elif args.verb == "check":
+            result = run_check(args.root)
+            if args.json:
+                print(result.to_json())
+            else:
+                for f in result.lint.findings:
+                    location = f.path + (f" [{f.component}]" if f.component else "")
+                    print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                if result.lint.errors:
+                    print("byte-compare skipped: fix lint errors first")
+                else:
+                    for f in result.mismatches:
+                        location = f.path + (f" [{f.component}]" if f.component else "")
+                        print(f"{f.level.upper()} {f.code} {location}: {f.message}")
+                lint_summary = f"{len(result.lint.errors)} error(s), {len(result.lint.warnings)} warning(s)"
+                if result.mismatches:
+                    lint_summary += f", {len(result.mismatches)} mismatch(es)"
+                print(lint_summary)
+            return result.exit_code
+        else:
+            raise AssertionError(f"unknown verb {args.verb!r}")
     except ConfigError as exc:
         print(f"grim: {exc}", file=sys.stderr)
         return 2
-    if args.json:
-        print(result.to_json())
-    else:
-        for f in result.findings:
-            location = f.path + (f" [{f.component}]" if f.component else "")
-            print(f"{f.level.upper()} {f.code} {location}: {f.message}")
-        for rel in result.fixed:
-            print(f"FIXED {rel}")
-        summary = f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)"
-        if result.fixed:
-            summary += f", {len(result.fixed)} file(s) fixed"
-        print(summary)
-    return result.exit_code
+    except OSError as exc:
+        print(f"grim: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

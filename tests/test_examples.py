@@ -17,3 +17,18 @@ def test_shipped_examples_lint_clean(tmp_path):
     shutil.copytree(src, tmp_path / "docs" / "components")
     result = grim.run_lint(tmp_path)
     assert result.errors == [], [f"{f.code} {f.path}: {f.message}" for f in result.errors]
+
+
+def test_examples_render(tmp_path):
+    src = REPO_ROOT / "doc-components" / "examples"
+    for type_dir in src.iterdir():
+        if type_dir.is_dir():
+            shutil.copytree(type_dir, tmp_path / "docs" / "components" / type_dir.name)
+    cfg = grim.load_config(tmp_path)
+    store = grim.load_store(cfg)
+    out1 = grim.render_store(store)
+    out2 = grim.render_store(grim.load_store(cfg))
+    assert out1 == out2
+    # Assert on unique body text, not ids: rendered output contains bodies only.
+    assert "Number ADRs adr-0001" not in out1["decisions.md"]   # superseded body skipped
+    assert "renderer.md" not in out1  # draft-only subsystem produces no file

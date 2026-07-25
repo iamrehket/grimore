@@ -2,6 +2,7 @@
 id: adr-slug-ids
 type: adr
 status: current
+supersedes: [adr-sequential-ids]
 date: 2026-07-24
 ---
 

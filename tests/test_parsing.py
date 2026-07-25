@@ -59,3 +59,23 @@ def test_non_mapping_frontmatter_is_e003(tmp_path):
     comp, findings = parse(tmp_path, p)
     assert comp is None
     assert [f.code for f in findings] == ["E003"]
+
+
+def test_non_utf8_component_is_e006(tmp_path):
+    d = tmp_path / "docs" / "components" / "note"
+    d.mkdir(parents=True)
+    (d / "binary.md").write_bytes(b"---\nid: note-binary\n---\n\xff\xfe garbage")
+    cfg = grim.load_config(tmp_path)
+    store = grim.load_store(cfg)
+    assert [f.code for f in store.findings] == ["E006"]
+    assert store.components == []
+
+
+def test_non_utf8_plan_is_w060(tmp_path):
+    d = tmp_path / "docs" / "plans"
+    d.mkdir(parents=True)
+    (d / "binary.md").write_bytes(b"\xff\xfe not a plan")
+    cfg = grim.load_config(tmp_path)
+    findings = grim.check_plans(cfg)
+    assert [f.code for f in findings] == ["W060"]
+    assert "UTF-8" in findings[0].message
