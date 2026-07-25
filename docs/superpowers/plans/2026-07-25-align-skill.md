@@ -178,6 +178,10 @@ git commit -m "IAM-39: pressure-test scenario and RED baseline for align"
 ```markdown
 ## Inline capture (the point of this skill)
 
+Template and schema paths below are relative to the doc-components
+directory shipped with this skill; in an adopting project, use its copy
+of that directory.
+
 Capture happens at the moment something settles - mid-interview, before
 the next question. Never defer to a batch pass at the end; a session
 interrupted after a decision but before a batch pass loses the decision.
@@ -259,10 +263,10 @@ Procedure per capture:
    promotion, not now, and this skill never promotes.
 
 If grim is available (tools/grim.py or the adopting project's copy),
-run `uv run tools/grim.py lint --root <project-root>` (the project
-root, not the components dir) after the last capture and BEFORE
-presenting the spec draft, and fix what it reports; if not, SCHEMA.md
-is the checklist.
+run `uv run <path-to-grim>/grim.py lint --root <project-root>` (in this
+repo, tools/grim.py; --root takes the project root, not the components
+dir) after the last capture and BEFORE presenting the spec draft, and
+fix what it reports; if not, SCHEMA.md is the checklist.
 ```
 
 - [ ] **Step 4: Write the reviewer-loop section.** The subagent prompt template, verbatim in the skill: "Review this spec and its referenced draft components against doc-components/SCHEMA.md and the session goal below. Reply with exactly three sections: Status (clean / needs work), Issues (numbered, each with the file and line it concerns), Recommendations (advisory improvements, clearly separated from Issues). Do not edit files." Plus the loop rule: fix Issues, ignore-or-adopt Recommendations deliberately, re-dispatch until clean, never self-certify.

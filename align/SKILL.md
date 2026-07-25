@@ -1,6 +1,6 @@
 ---
 name: align
-description: Use when brainstorming or designing a feature, or when someone says "align on", "let's design", or "start a spec". In a project adopting doc components, this replaces superpowers:brainstorming: it interviews one question at a time and captures glossary terms, ADRs, use cases, constraints, and non-goals inline - as draft components - the moment each one settles, then produces a spec that indexes what was captured.
+description: Use when brainstorming or designing a feature, or when someone says "align on", "let's design", or "start a spec". In a project adopting doc components, this replaces superpowers:brainstorming.
 ---
 
 # Align: Interview With Inline Capture
@@ -10,6 +10,10 @@ way superpowers:brainstorming does - but in a project that stores its
 decisions as components, capture cannot wait for a write-up at the end. It
 happens the instant something settles, mid-conversation, or it doesn't
 happen at all.
+
+When NOT to use this skill: if the project has no component store (no
+`.grimore.toml` and no components directory), use superpowers:brainstorming
+instead - do not create a component tree nobody asked for.
 
 ## Session flow
 
@@ -58,6 +62,10 @@ happen at all.
    itself.
 
 ## Inline capture (the point of this skill)
+
+Template and schema paths below are relative to the doc-components
+directory shipped with this skill; in an adopting project, use its copy
+of that directory.
 
 Capture happens at the moment something settles - mid-interview, before
 the next question. Never defer to a batch pass at the end; a session
@@ -140,10 +148,10 @@ Procedure per capture:
    promotion, not now, and this skill never promotes.
 
 If grim is available (tools/grim.py or the adopting project's copy),
-run `uv run tools/grim.py lint --root <project-root>` (the project
-root, not the components dir) after the last capture and BEFORE
-presenting the spec draft, and fix what it reports; if not, SCHEMA.md
-is the checklist.
+run `uv run <path-to-grim>/grim.py lint --root <project-root>` (in this
+repo, tools/grim.py; --root takes the project root, not the components
+dir) after the last capture and BEFORE presenting the spec draft, and
+fix what it reports; if not, SCHEMA.md is the checklist.
 
 ## Spec review loop
 
