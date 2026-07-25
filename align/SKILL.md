@@ -41,7 +41,7 @@ happen at all.
    frontmatter lists every component captured this session. The Decisions
    section is an index: one line per captured component ID, covering all
    of them - terms and non-goals included, not only ADRs (for example,
-   "Slug IDs over sequential numbering: adr-slug-ids") - and never
+   "Slug IDs instead of sequential ADR numbers: adr-slug-ids") - and never
    restating what the component says; the component is canonical, this
    section only points at it. Run the lint step described under Inline
    capture below before presenting this draft to the user.
@@ -77,12 +77,16 @@ in the spec body only - do not mint components for them.
 Procedure per capture:
 1. Copy the template; fill every field. status: draft always - this
    skill never writes current, never promotes, never edits an existing
-   non-draft component. date: today. Slug: lowercase [a-z0-9-], the
-   filename is the slug, id is <type>-<slug> (SCHEMA.md governs).
+   non-draft component. date: today in ISO YYYY-MM-DD. Slug: lowercase
+   [a-z0-9-], the filename is the slug, id is <type>-<slug> (SCHEMA.md
+   governs).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
-3. Announce it in one line: "captured adr-slug-ids (draft)". Then
-   return to the interview where you left off.
+3. Announce it in one line: "captured adr-slug-ids (draft)". Also keep a
+   running capture log - one line per component write or edit, in order,
+   each noting which user answer or decision triggered it - and include
+   that log when you present the spec draft or when asked to account for
+   the session. Then return to the interview where you left off.
 4. If the session revises a still-draft capture, SCHEMA.md draws the
    line: details changed but the decision stands - amend the draft in
    place (drafts are the only in-place-editable components); the

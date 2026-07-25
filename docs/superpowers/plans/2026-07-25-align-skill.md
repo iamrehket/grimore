@@ -169,7 +169,7 @@ git commit -m "IAM-39: pressure-test scenario and RED baseline for align"
 1. **Orient.** Read `docs/current/` (or the configured current dir) if it exists, glossary first — settled terminology governs the interview. Read `.grimore.toml` for paths; fall back to `docs/components/`, `docs/specs/` defaults.
 2. **Interview.** One question at a time, never a wall of questions. Prefer multiple-choice (AskUserQuestion-style with 2-4 options) over open-ended. Cover in rough order: purpose (why now, what hurts), actors and use cases, constraints (hard limits accepted), success criteria, explicit exclusions. Follow the user's energy; the order bends, the one-at-a-time rule does not.
 3. **Approaches.** Propose 2-3 approaches with a concrete recommendation and the trade-off each accepts. Multiple-choice the selection.
-4. **Spec.** Author from `doc-components/templates/spec.md` into the configured specs dir, dated filename. `components:` frontmatter lists every component captured this session; the Decisions section is an index with one entry per captured component ID — all of them, terms and non-goals included, not only ADRs ("Slug IDs over sequential numbering: adr-slug-ids") — never restating component content. Run the lint step (below) before presenting this draft to the user.
+4. **Spec.** Author from `doc-components/templates/spec.md` into the configured specs dir, dated filename. `components:` frontmatter lists every component captured this session; the Decisions section is an index with one entry per captured component ID — all of them, terms and non-goals included, not only ADRs ("Slug IDs instead of sequential ADR numbers: adr-slug-ids") — never restating component content. Run the lint step (below) before presenting this draft to the user.
 5. **Review loop.** Dispatch a spec-reviewer subagent with the spec and the created components; it returns Status / Issues / Recommendations (advisory). Fix real issues, re-run until Status is clean or the user overrides. Then user sign-off.
 6. **Handoff.** Offer superpowers:writing-plans; the plan carries `spec:` frontmatter pointing at the new spec (template: `doc-components/templates/plan.md`).
 
@@ -196,12 +196,16 @@ in the spec body only - do not mint components for them.
 Procedure per capture:
 1. Copy the template; fill every field. status: draft always - this
    skill never writes current, never promotes, never edits an existing
-   non-draft component. date: today. Slug: lowercase [a-z0-9-], the
-   filename is the slug, id is <type>-<slug> (SCHEMA.md governs).
+   non-draft component. date: today in ISO YYYY-MM-DD. Slug: lowercase
+   [a-z0-9-], the filename is the slug, id is <type>-<slug> (SCHEMA.md
+   governs).
 2. File goes under the configured components dir:
    <components>/<type>/<slug>.md.
-3. Announce it in one line: "captured adr-slug-ids (draft)". Then
-   return to the interview where you left off.
+3. Announce it in one line: "captured adr-slug-ids (draft)". Also keep a
+   running capture log - one line per component write or edit, in order,
+   each noting which user answer or decision triggered it - and include
+   that log when you present the spec draft or when asked to account for
+   the session. Then return to the interview where you left off.
 4. If the session revises a still-draft capture, SCHEMA.md draws the
    line: details changed but the decision stands - amend the draft in
    place (drafts are the only in-place-editable components); the
