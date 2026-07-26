@@ -1,13 +1,14 @@
 {
   "name": "grimore",
-  "version": "0.1.0",
-  "description": "Skills from the grimore doc-components system: align (brainstorm interview with inline component capture) and explain-diff (diff explanation guides).",
+  "version": "0.2.0",
+  "description": "Skills from the grimore doc-components system: align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), and adopt-docs (onboard a repo onto doc components).",
   "author": {
     "name": "Adam Albright",
     "email": "aalbright@iamrehket.me"
   },
   "skills": [
     "./align",
-    "./explain-diff"
+    "./explain-diff",
+    "./adopt-docs"
   ]
 }

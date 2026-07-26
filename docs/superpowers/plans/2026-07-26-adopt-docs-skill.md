@@ -120,14 +120,14 @@ Requirements doc: doc-components/SCHEMA.md. Templates: doc-components/templates/
 [grimore]
 components = "docs/components"
 current = "docs/current"
-specs = "docs/design/specs"
+specs = "docs/specs"
 plans = "docs/plans"
 default_branch = "main"
 types = ["adr", "term", "usecase", "constraint", "nongoal", "note"]
 instruction_files = ["CLAUDE.md", "AGENTS.md"]
 ```
 
-  then validate with `uv run tools/grim.py lint --root <target>` (exit 0 on the empty store).
+  (Template shows the all-defaults case; interview answers substitute — e.g. the primary scenario's `docs/design/specs` override. An earlier revision mistakenly baked that override into this template; the rubric's Appendix defaults govern.) Then validate with `uv run tools/grim.py lint --root <target>` (exit 0 on the empty store).
 - [ ] **Step 4:** Manifest + release metadata: update the repo's `.claude-plugin/plugin.json` to **byte-match the frozen bundle fixture's manifest** (skills incl. `./adopt-docs`, three-skill description, version `0.2.0`); update `marketplace.json`'s plugin-entry description likewise. No Codex-compatibility claims (IAM-56). The suite's marketplace guard passes from this commit on.
 - [ ] **Step 5: Commit; sonnet task review; fix loop.**
 
