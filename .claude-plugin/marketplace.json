@@ -1,0 +1,15 @@
+{
+  "name": "grimore",
+  "owner": {
+    "name": "Adam Albright",
+    "email": "aalbright@iamrehket.me"
+  },
+  "description": "Skills from the grimore doc-components system.",
+  "plugins": [
+    {
+      "name": "grimore",
+      "source": "./",
+      "description": "align (brainstorm interview with inline component capture) and explain-diff (diff explanation guides)."
+    }
+  ]
+}
