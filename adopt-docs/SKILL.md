@@ -672,8 +672,186 @@ remote (the no-remote path above already covers the alternative):
 
 ## Charter interview
 
-(Task 4 - not yet written in this file.)
+Mutation sequence step 8, above, runs after the CI workflow offer (or its
+documented-only equivalent) regardless of whether GitHub identity
+verified. Its purpose is to seed the project's charter and glossary with
+whatever the user already knows, so the very first render is not empty.
+
+This interview covers exactly four component types, asked in this fixed
+order: **use cases, constraints, non-goals, terms** - the same four that
+`grim render` compiles into `current/charter.md` (usecase, constraint,
+nongoal) and `current/glossary.md` (term), per SCHEMA.md's render
+mapping. `adr` and `note` are never asked about here: an ADR belongs to a
+design decision made through `align`, not an onboarding interview, and a
+note is a subsystem fact captured by finish-docs at branch finish - the
+same two exclusions `align/SKILL.md` already makes for its own inline
+capture table, restated here rather than assumed.
+
+**Enabled types only.** Before asking about a type, check it against this
+session's confirmed `types` answer (Configuration interview, above). If
+one of the four charter-relevant types is disabled, do not ask about it -
+state in one line that the type is disabled for this project and that
+anything the user brings up for it will be recorded, never captured as a
+component, then move to the next type in the fixed order. Never skip a
+disabled type silently; the one-line statement is mandatory even when the
+user never raises the topic themselves.
+
+**One question at a time, AskUserQuestion-style**, exactly as the
+configuration interview above: for each enabled type in turn, ask whether
+the user has a settled instance to offer right now, preferring 2-4
+concrete choices over an open prompt (for example: "Anything to capture
+for use cases? / Yes - describe it / Not yet / Skip use cases"). Never a
+wall of questions, never more than one type in flight at once, never
+proceed past a question without an explicit answer.
+
+**Settled vs. speculative - asked, never inferred.** When the user states
+a use case, constraint, non-goal, or term in their own words, do not
+capture it yet. Ask one more explicit, structured closing question first:
+"Is this settled now, or still speculative?" - two concrete options,
+nothing else. The answer alone decides the component's birth status:
+"Settled now" writes `status: current`; "Still speculative" writes
+`status: draft`. This is the deliberate divergence from `align/SKILL.md`,
+which always writes `draft` and never asks - say so plainly if the user
+asks why the questions differ. Never infer the status from confidence,
+phrasing, or hedging language in the user's own statement; if the closing
+question goes unanswered, the capture is not complete and nothing is
+written yet.
+
+**Capture procedure (self-contained).** This procedure does not depend on
+`align/SKILL.md` at runtime - it is cited above only for why the
+settled/speculative split diverges from it. Per capture, once both the
+statement and the closing question are answered:
+
+1. Copy the template for the type from **this adopting repo's own
+   vendored copy**, `<target>/doc-components/templates/<type>.md` - the
+   copy this same session's Vendoring step (above) just wrote into the
+   target, never this skill's own bundled copy and never a live
+   `align/`. Fill every field in the template. For a term, any rejected
+   synonym the user names alongside the settled word goes on the
+   template's `_Avoid_:` line, comma-separated - never folded into the
+   definition sentence.
+2. Build the slug from the user's own words, the same essentials
+   `align/SKILL.md` documents for its inline capture (cited for
+   rationale, restated here so this file stands alone): the words already
+   spoken when the decision settled, not a paraphrase; name the decision,
+   never an invented category noun; 2-4 words; drop scope qualifiers
+   ("v1", "for now") and negation particles ("no", "not", "won't") even
+   when the user said them - the type (for a non-goal) and the status
+   already carry that signal. When the decision carries an action, a name
+   for the state, and a measurement, keep all three, in that order
+   (action-name-measurement) - never drop to name+measurement alone, and
+   never drop to the measurement alone. When the user offers both a
+   generic descriptive phrase and a more specific, precise term for the
+   same idea, use the specific term - it is what they are committing to,
+   not just describing.
+3. `id` is `<type>-<slug>`; the filename is `<slug>.md`; the file goes
+   under `<components>/<type>/<slug>.md` - SCHEMA.md governs the exact
+   format (slug pattern, required fields, one type per directory).
+4. `status` is `current` or `draft`, exactly per the closing question's
+   answer above - never `draft` by default, never inferred.
+5. `date` is today, ISO `YYYY-MM-DD`.
+6. Write the file. Announce it in one line, status included: "captured
+   usecase-x (current)" or "captured nongoal-y (draft)".
+7. Append one line to the running capture log, in order, naming the
+   component and which two answers (the settling statement, then the
+   current/speculative answer) produced it. Keep this log for the final
+   adoption summary, below - do not discard it once the interview moves
+   on.
+
+Then return to the interview at the next enabled type in the fixed order.
+
+**The closing catch-all question.** Once the fourth fixed-order type
+(terms) has been asked and resolved - captured, declined, or skipped as
+disabled - the four per-type questions are done, but the interview is
+not: ask one more explicit, structured question before moving to
+Finishing an adoption at all: "Anything else to capture for the
+charter?" This is not a fifth type and it is not optional - ask it every
+time, even when none of the four types produced a single capture, and
+never enter Finishing an adoption without an explicit answer to it. If
+the user names something new here, capture it exactly like any other
+crystallization moment (the settled-or-speculative closing question
+still applies, the same capture procedure runs), then ask the catch-all
+again - it does not resolve until the user's answer is a plain no / done.
+
+**Refusal ends capture immediately.** If the user declines to continue at
+any point - mid-type, between types, or at the closing catch-all question
+itself - stop the charter interview right there and move to Finishing an
+adoption. This covers both an outright mid-interview decline and the
+ordinary end-of-interview case, where all four types have been asked and
+the catch-all's own answer is "nothing else": either way there is no
+batch pass afterward to sweep up types that were never reached, and no
+offer to "come back to it before finishing" - whatever was captured up to
+that point stands as-is, and the final adoption summary (below) records
+that the interview ended (by decline or by a "nothing else" answer at the
+catch-all) and what, if anything, was never asked.
+
+**Volunteered material for a disabled or out-of-scope type.** If the user
+volunteers content for a type that is disabled (e.g. non-goals when
+`types` excludes `nongoal`), or for `adr`/`note` - which this interview
+never asks about at all - never write it as a component, in this
+interview or any other. Record it as its own line in the capture log
+("volunteered, not captured: <one-line summary> (<type>, disabled)") and
+repeat it in the final adoption summary so it is visible, not silently
+lost, while making clear no file exists for it.
 
 ## Finishing an adoption
 
-(Task 4 - not yet written in this file.)
+Mutation sequence step 9, the last step, runs after the charter interview
+above concludes - whether it captured four components or zero.
+
+1. **Working render.** Run, in order, using the target's own vendored
+   `tools/grim.py` (known-good since this session just wrote it):
+   `uv run tools/grim.py lint --fix --root <target>`, then
+   `uv run tools/grim.py render --root <target>`, then
+   `uv run tools/grim.py check --root <target>`. Fix anything either step
+   surfaces before moving on - adoption never ends by handing the user a
+   red lint or a failing check.
+2. **Show the render.** Display the actual rendered content under
+   `<current>/` that reflects the components just captured (e.g.
+   `charter.md`, `glossary.md`) - not merely "render succeeded." An
+   adoption with zero `current`-status captures still shows the (mostly
+   empty) rendered view, so the user sees exactly what exists.
+3. **Always offer the adoption commit**, on a feature branch, regardless
+   of GitHub remote state, CI/protection outcome, or how much the charter
+   interview captured. This offer is never skipped - only ever declined.
+   - **Declined:** state plainly that the commit was declined and nothing
+     was committed; make no commit, create no branch. The fixture's own
+     prior history is all that remains.
+   - **Accepted, no verified GitHub remote** (none configured, a
+     non-GitHub remote, or a failed identity check per GitHub identity
+     and branch protection, above): local-only. Create the feature
+     branch, stage the adoption's own files by name (never `git add -A`
+     or `.`), commit. Stop there - state pushing and opening a PR as the
+     user's own follow-up, documented in the summary below, never emitted
+     as a guessed `gh` command against an unverified target.
+   - **Accepted, verified GitHub remote:** after the local commit, extend
+     the same offer to push the branch and open the adoption PR (Verified
+     remote: the pinned lifecycle, steps 1-4 above already fix this
+     ordering) - each step still gated on consent. This is the recorded
+     scheduling event (PR number, head SHA) the gate below verifies
+     against, recorded before any check polling begins.
+   - **Only once the PR exists** (or is confirmed already open, on a
+     resumed session) does the branch-protection question apply at all,
+     and only under a verified remote: follow The gate: five check
+     properties, above, exactly - if it holds, offer the bound mutation
+     (When the gate holds: the bound mutation); if it does not, emit When
+     the gate does not hold: the deferred sequence instead. Nothing here
+     repeats that text; this step only fixes where it sits in the finish
+     sequence.
+4. **Final adoption summary.** Always produced, no matter what was
+   declined along the way:
+   - The state of every artifact this session touched: `.grimore.toml`
+     (all six keys plus `instruction_files`), the vendored payload,
+     layout directories, each instruction file's disposition and
+     resulting state (exact match / created / repaired), the CI workflow
+     state, the charter components with their statuses, and the
+     branch-protection outcome (mutated / deferred / documented-only /
+     declined).
+   - The full capture log from the charter interview, in order.
+   - Any volunteered-but-uncaptured material recorded during the charter
+     interview, explicitly labeled so it is visible rather than silently
+     dropped.
+   - Next steps: whatever remains as the user's own follow-up - pushing
+     and opening a PR after a local-only commit, acting on a deferred
+     protection sequence, or anything else declined earlier in the
+     session.
