@@ -16,9 +16,9 @@ the charter-seeding interview, and the final commit/PR offer.
 Requirements doc: `doc-components/SCHEMA.md`. Templates:
 `doc-components/templates/`. CI recipe: `doc-components/CI.md`. Sibling
 skill: `align/SKILL.md` (the interview style below follows its
-one-question-at-a-time, AskUserQuestion-style discipline). Nothing here
-special-cases grimore's own repo - adopting grimore onto itself is a
-separate exercise, not this skill's job to detect or shortcut.
+one-question-at-a-time, capability-based choice discipline). Nothing here
+special-cases grimore's own repo - adopting grimore onto itself is a separate
+exercise, not this skill's job to detect or shortcut.
 
 When the repo is already `adopted` and merely unhealthy (lint/check
 failing), this is the wrong skill - hand it to finish-docs or ordinary
@@ -200,12 +200,12 @@ finish-docs), never to this skill's adoption-repair flow.
 
 ## Configuration interview
 
-The interview is not skippable and its answers are not something to
-infer from the opening request. Ask one question at a time,
-AskUserQuestion-style (2-4 concrete options where the choice is
-enumerable) - never a wall of questions in one message, and never proceed
-past a question without an explicit answer from the user. Cover, in this
-order:
+The interview is not skippable and its answers are not something to infer
+from the opening request. Ask one question at a time. Where a choice is
+enumerable, offer 2-4 concrete options through the host's structured-choice
+interaction when available and numbered plain text otherwise. Never ask a
+wall of questions in one message, and never proceed past a question without
+an explicit answer from the user. Cover, in this order:
 
 1. **Paths.** Present the four `DEFAULTS` (`components`, `current`,
    `specs`, `plans`) as one confirmable set, with the option to override
@@ -385,8 +385,8 @@ later, but the reason itself is not part of the rendered text:
 - The glossary clause restates SCHEMA.md's terminology-governs-synonyms
   rule for the harness file, rather than leaving it implicit.
 - The `spec:` frontmatter clause and the specs/plans redirect keep this
-  project's superpowers-produced planning artifacts inside the adopted
-  layout instead of the upstream tool's own default paths.
+  project's agent-workflow planning artifacts inside the adopted layout
+  instead of an external workflow's own default paths.
 - The three merge-discipline rules are `doc-components/CI.md`'s recipe,
   restated verbatim (see Merge discipline and CI workflow, below, for the
   workflow file that makes rule 2 and rule 3 true).
@@ -686,13 +686,14 @@ component, then move to the next type in the fixed order. Never skip a
 disabled type silently; the one-line statement is mandatory even when the
 user never raises the topic themselves.
 
-**One question at a time, AskUserQuestion-style**, exactly as the
-configuration interview above: for each enabled type in turn, ask whether
-the user has a settled instance to offer right now, preferring 2-4
-concrete choices over an open prompt (for example: "Anything to capture
-for use cases? / Yes - describe it / Not yet / Skip use cases"). Never a
-wall of questions, never more than one type in flight at once, never
-proceed past a question without an explicit answer.
+**One question at a time**, exactly as in the configuration interview above:
+for each enabled type in turn, ask whether the user has a settled instance to
+offer right now, preferring 2-4 concrete choices over an open prompt. Use the
+host's structured-choice interaction when available and numbered plain text
+otherwise (for example: "Anything to capture for use cases? 1. Yes - describe
+it 2. Not yet 3. Skip use cases"). Never ask a wall of questions, never have
+more than one type in flight at once, and never proceed past a question
+without an explicit answer.
 
 **Settled vs. speculative - asked, never inferred.** When the user states
 a use case, constraint, non-goal, or term in their own words, do not
