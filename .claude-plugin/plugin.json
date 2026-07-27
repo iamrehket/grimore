@@ -1,6 +1,6 @@
 {
   "name": "grimore",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Skills from the grimore doc-components system: align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), and adopt-docs (onboard a repo onto doc components).",
   "author": {
     "name": "Adam Albright",
