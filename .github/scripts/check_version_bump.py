@@ -1,33 +1,46 @@
 #!/usr/bin/env python3
-"""Require plugin.json's version to move by at least what the change type implies.
+"""Derive the plugin version from Conventional Commit types, and check or set it.
 
 The plugin ships as the whole repository (marketplace.json declares
 source "./"), so the version string in .claude-plugin/plugin.json is the only
-signal a consumer has that anything changed. This check makes that signal
-mandatory rather than remembered.
+signal a consumer has that anything changed. This computes what that version
+must be, so CI can verify it and an author can apply it from the same code
+path - a separate calculator would be free to drift from the checker.
+
+The target version is a pure function of the commit range: the required level
+is applied to the version at the merge-base, never to the current value.
+Running --apply once or five times therefore yields the same answer, and it
+will lower a version that was raised beyond what the commits justify. Express
+a bigger intent with a bigger type (feat!: rather than a hand-edited major).
 
 Rules, in order:
 
-1. A Version-Waive trailer in any commit skips the check. The reason is
-   mandatory and is echoed so reviewers see every bypass.
-2. A pull request touching only exempt paths passes. Exempt paths ship to
-   consumers but cannot change behaviour.
-3. Otherwise the highest Conventional Commit type found in the pull request
-   title or any non-merge commit sets a required floor - breaking major,
-   feat minor, fix patch. Declaring no type at all is a failure, not a pass:
-   the whole point is that an untyped change cannot ship silently.
-4. The actual version bump must be at least that floor. More is fine; less,
-   none, or a decrease is not.
+1. A Version-Waive trailer in any commit skips everything. The reason is
+   mandatory and is echoed so reviewers see each bypass.
+2. A pull request touching only exempt paths needs no bump. Exempt paths
+   reach consumers but cannot change behaviour.
+3. The pull request title must declare at least the highest type found in the
+   commits. A squash-merge keeps only the title, so a title that under-declares
+   would leave main's history justifying a smaller bump than the one that
+   shipped. Requiring dominance makes the answer identical before and after a
+   squash.
+4. The highest type sets the required level - breaking major, feat minor,
+   fix/refactor/perf/revert/build patch. No type at all on a consumer-facing
+   change is a failure, not a pass: reading absence as permission would
+   rebuild the hole this exists to close.
+5. Verify mode requires the actual bump to be at least that level; apply mode
+   writes exactly that level.
 
-Reads PR_TITLE and BASE_REF from the environment rather than interpolating
+Reads PR_TITLE and BASE_SHA from the environment rather than interpolating
 them into a shell command - the title is attacker-controlled text.
 """
 
-import json
+import argparse
 import os
 import re
 import subprocess
 import sys
+from typing import NoReturn
 
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 
@@ -40,6 +53,7 @@ LEVELS = ("none", "patch", "minor", "major")
 SUBJECT_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\([^)]*\))?(?P<bang>!)?:\s+\S")
 BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE:\s*\S", re.MULTILINE)
 WAIVE_RE = re.compile(r"^Version-Waive:\s*(\S.*)$", re.MULTILINE)
+VERSION_RE = re.compile(r'("version"\s*:\s*")([^"]*)(")')
 
 # Consumers receive changed bytes whatever the intent, so every type that
 # represents real work on shipped code earns at least a patch. Types absent
@@ -64,7 +78,7 @@ def run(*args):
     return result.stdout
 
 
-def fail(message):
+def fail(message) -> NoReturn:
     print(f"FAIL: {message}")
     sys.exit(1)
 
@@ -80,6 +94,10 @@ def parse_version(raw):
     return tuple(int(p) for p in parts)
 
 
+def show_version(version):
+    return ".".join(str(n) for n in version)
+
+
 def bump_level(base, head):
     """Classify the move from base to head, or 'invalid' if it went backwards."""
     if head < base:
@@ -93,6 +111,18 @@ def bump_level(base, head):
     return "none"
 
 
+def apply_level(version, level):
+    """The version reached by applying one level to version."""
+    major, minor, patch = version
+    if level == "major":
+        return (major + 1, 0, 0)
+    if level == "minor":
+        return (major, minor + 1, 0)
+    if level == "patch":
+        return (major, minor, patch + 1)
+    return version
+
+
 def message_level(message):
     """Highest level implied by one commit message or pull request title."""
     subject, _, body = message.partition("\n")
@@ -104,6 +134,15 @@ def message_level(message):
     return TYPE_LEVELS.get(match.group("type").lower(), "none")
 
 
+def highest(messages):
+    level = "none"
+    for message in messages:
+        candidate = message_level(message)
+        if rank(candidate) > rank(level):
+            level = candidate
+    return level
+
+
 def is_exempt(path):
     if path.startswith(EXEMPT_PREFIXES) or path in EXEMPT_FILES:
         return True
@@ -111,7 +150,33 @@ def is_exempt(path):
     return "/" not in path and path.endswith(".md")
 
 
+def read_manifest_version(text):
+    match = VERSION_RE.search(text)
+    if not match:
+        fail(f"no version field in {PLUGIN_MANIFEST}")
+    return parse_version(match.group(2))
+
+
 def main():
+    parser = argparse.ArgumentParser(
+        description="Check or set the plugin version implied by the commit range."
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--apply", action="store_true",
+        help="write the computed version into the manifest",
+    )
+    mode.add_argument(
+        "--print", dest="print_only", action="store_true",
+        help="print the computed version and exit",
+    )
+    parser.add_argument(
+        "--message",
+        default="",
+        help="message of a commit about to be made, counted alongside the range",
+    )
+    args = parser.parse_args()
+
     pr_title = os.environ.get("PR_TITLE", "")
     # CI passes the pull request's base SHA, which is already in history under
     # fetch-depth: 0. The origin/<branch> form is the local-testing fallback.
@@ -141,12 +206,20 @@ def main():
         print(f"exempt: {len(changed)} changed path(s), none consumer-facing")
         return
 
-    required = "none"
-    for message in [pr_title, *commits]:
-        level = message_level(message)
-        if rank(level) > rank(required):
-            required = level
+    authored = [*commits, args.message] if args.message else commits
+    commit_level = highest(authored)
 
+    # Squash-merge keeps only the title, so it has to stand alone.
+    if pr_title and rank(message_level(pr_title)) < rank(commit_level):
+        fail(
+            f"pull request title declares {message_level(pr_title)}, but a commit "
+            f"declares {commit_level}.\n"
+            "  raise the title to match: squashing keeps only the title, so a\n"
+            "  lower title would leave the merged history justifying a smaller\n"
+            "  bump than the one that shipped."
+        )
+
+    required = highest([pr_title, *authored]) if pr_title else commit_level
     if required == "none":
         fail(
             "consumer-facing change with no Conventional Commit type.\n"
@@ -157,24 +230,51 @@ def main():
             "  or add a 'Version-Waive: <reason>' commit trailer."
         )
 
-    base_manifest = json.loads(run("git", "show", f"{merge_base}:{PLUGIN_MANIFEST}"))
-    with open(PLUGIN_MANIFEST) as handle:
-        head_manifest = json.load(handle)
-    base_version = parse_version(base_manifest["version"])
-    head_version = parse_version(head_manifest["version"])
-    actual = bump_level(base_version, head_version)
+    base_version = read_manifest_version(
+        run("git", "show", f"{merge_base}:{PLUGIN_MANIFEST}")
+    )
+    target = apply_level(base_version, required)
 
-    shown = ".".join(str(n) for n in base_version), ".".join(str(n) for n in head_version)
+    if args.print_only:
+        print(show_version(target))
+        return
+
+    with open(PLUGIN_MANIFEST) as handle:
+        text = handle.read()
+    head_version = read_manifest_version(text)
+
+    if args.apply:
+        if head_version == target:
+            print(f"already at {show_version(target)} ({required} from "
+                  f"{show_version(base_version)})")
+            return
+        if head_version > target:
+            print(f"note: lowering {show_version(head_version)} to the computed "
+                  f"{show_version(target)}; the version is a function of the "
+                  f"commit range, so raise the type to raise the version")
+        with open(PLUGIN_MANIFEST, "w") as handle:
+            handle.write(VERSION_RE.sub(
+                lambda m: f"{m.group(1)}{show_version(target)}{m.group(3)}",
+                text,
+                count=1,
+            ))
+        print(f"set {show_version(head_version)} -> {show_version(target)} "
+              f"({required} from {show_version(base_version)})")
+        return
+
+    actual = bump_level(base_version, head_version)
     if actual == "invalid":
-        fail(f"version went backwards: {shown[0]} -> {shown[1]}")
+        fail(f"version went backwards: "
+             f"{show_version(base_version)} -> {show_version(head_version)}")
     if rank(actual) < rank(required):
         fail(
             f"change requires a {required} bump, got {actual} "
-            f"({shown[0]} -> {shown[1]}).\n"
-            f"  raise {PLUGIN_MANIFEST}'s version to at least a {required} bump."
+            f"({show_version(base_version)} -> {show_version(head_version)}).\n"
+            f"  run this script with --apply to set {show_version(target)}."
         )
 
-    print(f"ok: {required} required, {actual} applied ({shown[0]} -> {shown[1]})")
+    print(f"ok: {required} required, {actual} applied "
+          f"({show_version(base_version)} -> {show_version(head_version)})")
 
 
 if __name__ == "__main__":

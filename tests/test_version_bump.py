@@ -50,15 +50,19 @@ def touch_skill(root):
     (root / "adopt-docs" / "SKILL.md").write_text("changed\n")
 
 
-def check(root, base, title=""):
+def check(root, base, title="", *args):
     r = subprocess.run(
-        ["python3", str(CHECKER)],
+        ["python3", str(CHECKER), *args],
         cwd=root,
         capture_output=True,
         text=True,
         env={**os.environ, "BASE_SHA": base, "PR_TITLE": title},
     )
     return r.returncode, r.stdout + r.stderr
+
+
+def version_of(root):
+    return json.loads((root / ".claude-plugin" / "plugin.json").read_text())["version"]
 
 
 def test_exempt_only_change_passes(tmp_path):
@@ -164,8 +168,8 @@ def test_breaking_change_footer_requires_major(tmp_path):
     base = repo(tmp_path)
     touch_skill(tmp_path)
     set_version(tmp_path, "0.3.0")
-    commit(tmp_path, "feat: thing\n\nBREAKING CHANGE: drops the old flag")
-    code, out = check(tmp_path, base, "feat: thing")
+    commit(tmp_path, "feat!: thing\n\nBREAKING CHANGE: drops the old flag")
+    code, out = check(tmp_path, base, "feat!: thing")
     assert code == 1
     assert "requires a major bump" in out
 
@@ -201,14 +205,23 @@ def test_type_may_come_from_the_pull_request_title_alone(tmp_path):
     assert check(tmp_path, base, "feat: thing")[0] == 0
 
 
-def test_breaking_commit_outranks_a_feat_title(tmp_path):
+def test_title_must_declare_the_highest_type(tmp_path):
+    """Squash keeps only the title, so a lower title would lose the type."""
     base = repo(tmp_path)
     touch_skill(tmp_path)
-    set_version(tmp_path, "0.3.0")
+    set_version(tmp_path, "1.0.0")
     commit(tmp_path, "feat!: breaking inside")
     code, out = check(tmp_path, base, "feat: thing")
     assert code == 1
-    assert "requires a major bump" in out
+    assert "title declares minor, but a commit declares major" in out
+
+
+def test_title_matching_the_highest_type_passes(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_version(tmp_path, "1.0.0")
+    commit(tmp_path, "feat!: breaking inside")
+    assert check(tmp_path, base, "feat!: thing")[0] == 0
 
 
 def test_scoped_type_parses(tmp_path):
@@ -261,3 +274,99 @@ def test_merging_the_base_branch_does_not_import_its_types(tmp_path):
     code, out = check(tmp_path, base_tip, "fix: thing")
     assert code == 0
     assert "patch required, patch applied" in out
+
+
+def test_apply_writes_the_computed_version(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: thing")
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 0
+    assert version_of(tmp_path) == "0.3.0"
+    assert "set 0.2.0 -> 0.3.0 (minor from 0.2.0)" in out
+
+
+def test_apply_is_idempotent(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: thing")
+    check(tmp_path, base, "feat: thing", "--apply")
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 0
+    assert version_of(tmp_path) == "0.3.0"
+    assert "already at 0.3.0" in out
+
+
+def test_apply_lowers_a_version_raised_beyond_the_commits(tmp_path):
+    """The version is a function of the range, so it can move down too."""
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_version(tmp_path, "5.0.0")
+    commit(tmp_path, "fix: thing")
+    code, out = check(tmp_path, base, "fix: thing", "--apply")
+    assert code == 0
+    assert version_of(tmp_path) == "0.2.1"
+    assert "lowering 5.0.0" in out
+
+
+def test_apply_counts_an_in_flight_message(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "fix: groundwork")
+    code, _ = check(tmp_path, base, "", "--apply", "--message", "feat: about to commit")
+    assert code == 0
+    assert version_of(tmp_path) == "0.3.0"
+
+
+def test_apply_preserves_manifest_formatting(tmp_path):
+    base = repo(tmp_path)
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text(
+        '{\n  "name": "grimore",\n  "version": "0.2.0",\n  "author": "x"\n}\n'
+    )
+    commit(tmp_path, "chore: reformat")
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: thing")
+    check(tmp_path, base, "feat: thing", "--apply")
+    text = (tmp_path / ".claude-plugin" / "plugin.json").read_text()
+    assert text == '{\n  "name": "grimore",\n  "version": "0.3.0",\n  "author": "x"\n}\n'
+
+
+def test_print_reports_the_target_without_writing(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: thing")
+    code, out = check(tmp_path, base, "feat: thing", "--print")
+    assert code == 0
+    assert out.strip() == "0.3.0"
+    assert version_of(tmp_path) == "0.2.0"
+
+
+def test_squashing_yields_the_same_version(tmp_path):
+    """The whole point of title-dominance: same answer before and after."""
+    base = repo(tmp_path)
+    title = "feat: the actual change"
+    touch_skill(tmp_path)
+    commit(tmp_path, "fix: groundwork")
+    (tmp_path / "adopt-docs" / "SKILL.md").write_text("again\n")
+    commit(tmp_path, title)
+    code, before = check(tmp_path, base, title, "--print")
+    assert code == 0
+
+    # Collapse to one commit whose subject is the title, as a squash-merge does.
+    git(tmp_path, "reset", "--soft", base)
+    commit(tmp_path, title)
+    code, after = check(tmp_path, base, title, "--print")
+    assert code == 0
+    assert before.strip() == after.strip() == "0.3.0"
+
+
+def test_waiver_also_blocks_apply(tmp_path):
+    """A waived baseline must not be recomputed and clobbered."""
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_version(tmp_path, "1.0.0")
+    commit(tmp_path, "feat: thing\n\nVersion-Waive: deliberate 1.0.0 baseline")
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 0
+    assert "WAIVED" in out
+    assert version_of(tmp_path) == "1.0.0"
