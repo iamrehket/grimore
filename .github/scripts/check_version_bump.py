@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Derive the plugin version from Conventional Commit types, and check or set it.
 
-The plugin ships as the whole repository (marketplace.json declares
-source "./"), so the version string in .claude-plugin/plugin.json is the only
-signal a consumer has that anything changed. This computes what that version
-must be, so CI can verify it and an author can apply it from the same code
-path - a separate calculator would be free to drift from the checker.
+The plugin ships as the whole repository (marketplace.json declares source
+"./"), so its native manifests must share one version. The Claude Code
+manifest is authoritative at the merge-base; the Codex manifest mirrors its
+shared metadata at the branch head. This computes what the release version
+must be, so CI can verify it and an author can apply it to both manifests from
+the same code path.
 
 The target version is a pure function of the commit range: the required level
 is applied to the version at the merge-base, never to the current value.
@@ -36,13 +37,18 @@ them into a shell command - the title is attacker-controlled text.
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import NoReturn
 
-PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
+CLAUDE_MANIFEST = ".claude-plugin/plugin.json"
+CODEX_MANIFEST = ".codex-plugin/plugin.json"
+SHARED_FIELDS = ("name", "version", "description", "author", "skills")
 
 # Paths that reach consumers but cannot change how the plugin behaves.
 EXEMPT_PREFIXES = ("docs/", "tests/", ".github/")
@@ -68,6 +74,10 @@ TYPE_LEVELS = {
     "revert": "patch",
     "build": "patch",
 }
+
+
+class AtomicWriteError(RuntimeError):
+    """Raised after a dual-manifest write fails and restoration is attempted."""
 
 
 def run(*args):
@@ -150,11 +160,119 @@ def is_exempt(path):
     return "/" not in path and path.endswith(".md")
 
 
-def read_manifest_version(text):
+def parse_manifest(text, label):
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        fail(f"{label} is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        fail(f"{label} must contain a JSON object")
+    missing = [field for field in SHARED_FIELDS if field not in data]
+    if missing:
+        fail(f"{label} missing shared field(s): {', '.join(missing)}")
+    return data
+
+
+def load_manifest(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail(f"cannot read {path}: {exc}")
+    return text, parse_manifest(text, path)
+
+
+def shared_drift(claude, codex, *, include_version):
+    fields = SHARED_FIELDS if include_version else tuple(
+        field for field in SHARED_FIELDS if field != "version"
+    )
+    return [field for field in fields if claude[field] != codex[field]]
+
+
+def fail_on_shared_drift(claude, codex, *, include_version):
+    drift = shared_drift(claude, codex, include_version=include_version)
+    if not drift:
+        return
+    details = "\n".join(
+        f"  shared field {field!r} differs between "
+        f"{CLAUDE_MANIFEST} and {CODEX_MANIFEST}"
+        for field in drift
+    )
+    fail(f"native plugin manifests have shared-field drift:\n{details}")
+
+
+def read_manifest_version(text, label=CLAUDE_MANIFEST):
     match = VERSION_RE.search(text)
     if not match:
-        fail(f"no version field in {PLUGIN_MANIFEST}")
+        fail(f"no version field in {label}")
     return parse_version(match.group(2))
+
+
+def rewrite_manifest_version(text, version, label):
+    if not VERSION_RE.search(text):
+        fail(f"no version field in {label}")
+    return VERSION_RE.sub(
+        lambda match: (
+            f"{match.group(1)}{show_version(version)}{match.group(3)}"
+        ),
+        text,
+        count=1,
+    )
+
+
+def _stage_bytes(path, payload, mode):
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+        os.chmod(staged, mode)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    return staged
+
+
+def write_versions_atomically(updates):
+    """Write every manifest or restore every original after a write failure."""
+    originals = {
+        path: (path.read_bytes(), path.stat().st_mode)
+        for path in updates
+    }
+    staged = {}
+    try:
+        for path, text in updates.items():
+            _, mode = originals[path]
+            staged[path] = _stage_bytes(path, text.encode("utf-8"), mode)
+        for path in updates:
+            os.replace(staged[path], path)
+    except OSError as write_error:
+        restore_errors = []
+        for path, (original, mode) in originals.items():
+            restore = None
+            try:
+                restore = _stage_bytes(path, original, mode)
+                os.replace(restore, path)
+            except OSError as restore_error:
+                restore_errors.append(f"{path}: {restore_error}")
+            finally:
+                if restore is not None:
+                    restore.unlink(missing_ok=True)
+        message = f"dual-manifest write failed: {write_error}"
+        if restore_errors:
+            message += "; restoration also failed: " + "; ".join(restore_errors)
+        raise AtomicWriteError(message) from write_error
+    finally:
+        for path in staged.values():
+            path.unlink(missing_ok=True)
+
+
+def manifest_exists_at(revision, path):
+    listing = run("git", "ls-tree", "--full-tree", revision, "--", path)
+    return bool(listing.strip())
 
 
 def main():
@@ -198,6 +316,14 @@ def main():
         print(f"WAIVED by trailer: {waiver.group(1).strip()}")
         return
 
+    claude_text, claude = load_manifest(CLAUDE_MANIFEST)
+    codex_text, codex = load_manifest(CODEX_MANIFEST)
+    fail_on_shared_drift(
+        claude,
+        codex,
+        include_version=not args.apply,
+    )
+
     changed = [p for p in run(
         "git", "diff", "--name-only", merge_base, "HEAD"
     ).splitlines() if p]
@@ -231,20 +357,28 @@ def main():
         )
 
     base_version = read_manifest_version(
-        run("git", "show", f"{merge_base}:{PLUGIN_MANIFEST}")
+        run("git", "show", f"{merge_base}:{CLAUDE_MANIFEST}"),
+        f"{CLAUDE_MANIFEST} at {merge_base}",
     )
+    if manifest_exists_at(merge_base, CODEX_MANIFEST):
+        base_codex_text = run(
+            "git", "show", f"{merge_base}:{CODEX_MANIFEST}"
+        )
+        parse_manifest(
+            base_codex_text,
+            f"{CODEX_MANIFEST} at {merge_base}",
+        )
     target = apply_level(base_version, required)
 
     if args.print_only:
         print(show_version(target))
         return
 
-    with open(PLUGIN_MANIFEST) as handle:
-        text = handle.read()
-    head_version = read_manifest_version(text)
+    head_version = read_manifest_version(claude_text, CLAUDE_MANIFEST)
 
     if args.apply:
-        if head_version == target:
+        codex_version = read_manifest_version(codex_text, CODEX_MANIFEST)
+        if head_version == target and codex_version == target:
             print(f"already at {show_version(target)} ({required} from "
                   f"{show_version(base_version)})")
             return
@@ -252,14 +386,25 @@ def main():
             print(f"note: lowering {show_version(head_version)} to the computed "
                   f"{show_version(target)}; the version is a function of the "
                   f"commit range, so raise the type to raise the version")
-        with open(PLUGIN_MANIFEST, "w") as handle:
-            handle.write(VERSION_RE.sub(
-                lambda m: f"{m.group(1)}{show_version(target)}{m.group(3)}",
-                text,
-                count=1,
-            ))
+        updates = {
+            Path(CLAUDE_MANIFEST): rewrite_manifest_version(
+                claude_text,
+                target,
+                CLAUDE_MANIFEST,
+            ),
+            Path(CODEX_MANIFEST): rewrite_manifest_version(
+                codex_text,
+                target,
+                CODEX_MANIFEST,
+            ),
+        }
+        try:
+            write_versions_atomically(updates)
+        except AtomicWriteError as exc:
+            fail(str(exc))
         print(f"set {show_version(head_version)} -> {show_version(target)} "
-              f"({required} from {show_version(base_version)})")
+              f"({required} from {show_version(base_version)}); "
+              "synchronized both manifests")
         return
 
     actual = bump_level(base_version, head_version)
