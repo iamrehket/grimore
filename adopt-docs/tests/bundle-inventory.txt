@@ -1,0 +1,119 @@
+# bundle-inventory.txt - SHA-256 of every file in the frozen adopt-docs
+# pressure-test bundle (adopt-docs/tests/rubric.md, "Bundle contract").
+#
+# Build procedure (exact, reproducible; see rubric.md for the full
+# rationale):
+#   1. git -C <grimore-checkout> archive HEAD | tar -x -C <bundle-root>
+#      - extracts the committed tree at HEAD, no .git, nothing untracked
+#      or gitignored (.venv/, .idea/, .scratch/, .superpowers/,
+#      __pycache__/, .pytest_cache/, .playwright-mcp/, .DS_Store are all
+#      absent from HEAD already - git archive excludes them with no
+#      separate exclude-list to maintain).
+#   2. Overwrite <bundle-root>/.claude-plugin/plugin.json with the FINAL
+#      manifest: version 0.2.0; description naming align, explain-diff,
+#      and adopt-docs; skills = ["./align", "./explain-diff",
+#      "./adopt-docs"]; same author block as the pre-existing file.
+#   3. Add adopt-docs/tests/{rubric.md, scenario-*.md, stub-gh} to the
+#      bundle (identical bytes to the real repo's copies). Do NOT add
+#      adopt-docs/SKILL.md (absent - the RED condition),
+#      bundle-inventory.txt (this file - a manifest OF the bundle, not
+#      IN it - it is NEVER copied into the bundle and does NOT hash
+#      itself, in RED or GREEN), or baseline-red.md (RED-run output).
+#   4. shasum -a 256 every file in the bundle, sorted by relative path
+#      (bare paths, no ./ prefix). That is exactly this file's data
+#      section below.
+#
+# GREEN (Task 4) reuses these identical bytes plus exactly one addition,
+# adopt-docs/SKILL.md - every other line below must still verify:
+#   BUNDLE_ROOT=<bundle-root>
+#   GRIMORE_CHECKOUT=<grimore-checkout>
+#   cd "$BUNDLE_ROOT"
+#   find . -type f ! -path './adopt-docs/SKILL.md' \
+#     | sort | xargs shasum -a 256 \
+#     | sed 's|  \./|  |' \
+#     | diff - <(grep -v '^#' "$GRIMORE_CHECKOUT/adopt-docs/tests/bundle-inventory.txt")
+# `find` prefixes paths with ./ - the sed strips it to match this file's
+# bare paths. This file is read from the real repo checkout, not from
+# inside $BUNDLE_ROOT (see step 3 above): set $GRIMORE_CHECKOUT even
+# though the shell has already cd'ed into the bundle.
+# An empty diff is the pass condition.
+#
+# File count: 78 (RED). GREEN: 79 (adds adopt-docs/SKILL.md only).
+b8c7ed516af2d29f779986ebaf20a95d02a83a38d9c341f206b931f859dedebd  .claude-plugin/marketplace.json
+5582898441f3c282bd73eee17272049693673fe3757a03f44bdaf9b07318aaf9  .claude-plugin/plugin.json
+9da7082dbe8be84594350bb0d1c9651ed4586fbcff80c2a8ad69248823aae4aa  .github/workflows/tests.yml
+f5d575b863823816ac52cbdc5ceefa75a08886cf8eff35ac34089631c9cf9ce0  .gitignore
+60d0f6915b2f16e91730fcdd873fbdaa94779af2eb541d0de39c2c19fdfe8f8e  adopt-docs/tests/rubric.md
+cad22058966a5e7c4617b01baf4f0e755ed55ba1bb003e1efe0dbb76f8038b47  adopt-docs/tests/scenario-classifier.md
+0460404bb0e62b18fafe78d82b27e07a117ec3e097ff82c601fc50d3b5a85bad  adopt-docs/tests/scenario-collision.md
+2e92d857e4ccefca9e54ebb67fb54f8a426522d1704eceaa3fb46f6ea4d2186f  adopt-docs/tests/scenario-neither-restricted.md
+f7588ad831e774db07d6755af4188b3537d83316f1b94ad49154d92cab536a4e  adopt-docs/tests/scenario-protection-stub.md
+3fb42e4497eaf0e7ad0f932ac86d3f40acad93563a9c0d9fe890760ae67bf96b  adopt-docs/tests/scenario-resume-agents-only.md
+20577baf96b6122a40e09387fd701135a9ae7add3697d6ac04e0915bac7c204c  adopt-docs/tests/scenario-widget-service.md
+8edea21e7319298521370c375e2d4193ff83fc2bd769886449852a4661cc3288  adopt-docs/tests/stub-gh
+9eba78bdeb1168fdad7e69806854068ca34b281371ca21cf5e1a546be538f50d  align/SKILL.md
+aaaccd6c4a94a40a8bc25f68e6cc5ac4999f81654b5f7da112d510f8c570c339  align/tests/baseline-red.md
+77260ffb426b4f934a6e41fe3cc914f576600ef276ad509afc87b8787fe05b6d  align/tests/result-green.md
+faf069639d5376f875928c1098bd0a957ddbaf69d12d0a110c834db2e4e22ca1  align/tests/rubric.md
+29c8400fa4f2685bb479b1aa898ab590feccdc4f65e5d440f3095a17df295b04  align/tests/scenario-ingest-cache.md
+78e27feea0e91f0025e8f53c162d8622fd1e555c0deaf228ae0771e1ff9a47e6  doc-components/CI.md
+1e0ed98e1e45ce7353aad0ee61e025302dd2800d3bbce145c6959063117b30a5  doc-components/examples/adr/sequential-ids.md
+7187966c36322b5abab925c7e7dd4f51e01ff8e9630eb6944577645971388987  doc-components/examples/adr/slug-ids.md
+94e2774a77e03708a50858cbd8676fba61bff886bc608315fcb239dcd52a64d8  doc-components/examples/constraint/single-file-cli.md
+9639b854c14ce5c071595978d0dc43bf8a1dc8e4c2e71aebe099fc26a622ee72  doc-components/examples/nongoal/multi-context-glossary.md
+99b72ce4ee1efc6117ffc90d981e1988a77fc89dc8e2f4b60f834d0bb62a566a  doc-components/examples/note/component-store.md
+106b1173830bd5589b11267cf4791dee93f5373f47498d9c0dd4ba874a3ea520  doc-components/examples/note/render-pipeline-draft.md
+e0b8007f3ab72aa990334029ce05f1fdbdbc705858d93b14a5e7ab077e52520b  doc-components/examples/term/component.md
+9babf759404e103d5f9fd34c2893aab50524fd0d28fa04dd8ca5fb5dd19c14de  doc-components/examples/usecase/catch-up-digest.md
+3d3b3fea6fe5a43e0904e23bb4afc4dee76692c35c1fa7a0f2c04818f43cd6a4  doc-components/SCHEMA.md
+6abf31bd2fbd1b29c5568ba477342e3c7c3f2b81fad26f09da5411ffa79830f6  doc-components/templates/adr.md
+05f7e9538335e652703e739c37ec8329c1f402f9e0333c1be1bf2af2dc86ba5c  doc-components/templates/constraint.md
+3245d5b05fb07e2f5a2f93986dc0b69573b0227f519bd7f0b24474b3a62cfb53  doc-components/templates/nongoal.md
+7a5ec92c70bcdf738456865e50acea0c16a0728e332f65ea6aee6f28709fd88d  doc-components/templates/note.md
+4c7e4153cc91282be7ce95b9b6c00ae098af034655b796408159593144f4cc27  doc-components/templates/plan.md
+1d305bc7bc1c6646a95e1cd8844b43e34669eadf806aef8286c204a39994b3c6  doc-components/templates/spec.md
+d6b4a27c08f43068894c72f73fd93cdf8b4bb8aec680f0593eeac30a8caf2780  doc-components/templates/term.md
+bf7454f9d6261682bda7a0335eb581e0d66e181d5d28d06a236b3475aff0e089  doc-components/templates/usecase.md
+c114b2dd3677baa00e6d3c4354c37ab4edf2efd93bca74b7cf3d6befeec9473c  docs/handoffs/2026-07-26-doc-components-next.md
+1a7b8b745ec1d2622a7d6596bff29ea396a129ebbd6a39125b7b9639814e4717  docs/superpowers/plans/2026-07-13-explain-diff-skill.md
+e8c3d0eed6cb80cd129e0388ae75450533457d136279c22642c2ea9c375042ef  docs/superpowers/plans/2026-07-24-component-store-schema.md
+1f8cdcfb1debc10eea0423471494d31b1d01fd8ac1f11a376ab5e2dd4234040f  docs/superpowers/plans/2026-07-24-grim-lint-core.md
+e6b1ba802418168fa9744fe01f28f82c91ddd0a9b45a129e0dffcd9dda238051  docs/superpowers/plans/2026-07-25-align-skill.md
+c5cc7d988f774d5128b8ca2690d4180e37aff10f5f60e9dbf407302f0927fb77  docs/superpowers/plans/2026-07-25-grim-render-check.md
+4c10273bfae802691798e00d84d856cbe36edd78f4f15d5b5ca280505935b721  docs/superpowers/plans/2026-07-25-touched-path-guard.md
+3971d851f997dbb2b22f016ceab720e1ea3958e490abf0f16642eb5b06a5c427  docs/superpowers/plans/2026-07-26-adopt-docs-skill.md
+ed4e0a32fda49696b69550232d38a9581d78e6fcddcbac2528ae3057e7863d99  docs/superpowers/specs/2026-07-13-explain-diff-skill-design.md
+dd1bc901784a1f3fdc97aa8572e5fdc09a7341ea96ef77f03aef691c56df1fae  docs/superpowers/specs/2026-07-24-doc-components-design.md
+a3133ffa6adeb8a415a41e943f68711f830abccbc5444458d49a222d66c8b611  docs/triaging/2026-07-19-doc-reconciliation-triage.md
+a43bc1afd446f9c4cc66ac5dd45d02e8d65e26fc5344ec0ef787f88d6ddb6f9e  explain-diff/assets/mermaid.min.js
+2c5e9e7d9ca8d71c7a03b85889f2a29a1f980f76620dad9739a6bfb367148b88  explain-diff/assets/template.html
+b2b7dbda56f53bd9992bd4c11fc43db1e701b99633874de079e3a16912f1be42  explain-diff/examples/payload.example.json
+2fae897fbf6a6c4afa0260af20b9314713d7545c09f846f93e54ff5282526c5d  explain-diff/render.py
+9f79260a61dc3231a4ba1547d56a4e2069a2fb90da93fa00c98c03ef2fd92fef  explain-diff/schema.json
+aa8346d0496388941c826190ba70758b468f571d9bf90c43e3f06e985ff67586  explain-diff/SKILL.md
+1ffade5db29d9f3aa515605d7c920fb20b5121763b071335fe9e283af321bfcf  explain-diff/tests/conftest.py
+77c08d1445f9c3c3b8c5b968853676ee49cbd1b0251170af7177644f3936a2ab  explain-diff/tests/test_e2e.py
+59a98f173539767840370084fc4062177a1393fb57359e7c5ea8e48a206b866d  explain-diff/tests/test_helpers.py
+705f9242a3bda223a2e22dcc4c0df1f33afdc8ad725cbe1b13ebe0147f0344f5  explain-diff/tests/test_hunks.py
+75f4f0492aafecf5a5e3297b413e19cc3896ad164631d6582e12617327d533aa  explain-diff/tests/test_render_html.py
+f384a8f2665824c4140387267026e2af3285eeb1ee725a85d6603c7986d261ed  explain-diff/tests/test_render_md.py
+7b369401335c3b4e58cf054540ee1561d48ccfe535f5c05ca23ad7831aed878b  explain-diff/tests/test_validation.py
+29e6edde1871abeec547f8cbcc45df7bf696099816116024840ad8a103f5ed8f  pyproject.toml
+e898d33477c902934be8716f0994959ba0a1404f84fa97c9098e9f1b9c8ff98d  tests/helpers.py
+fa3cef4899f120574b9943939409ab1f7cdbd074c19238a65f2c8c0681c40976  tests/test_avoid_terms.py
+927932bf40067adf7a4ca0e0b8769c81bf8b89d99b6e4d7d2d5c12d4a6a0f164  tests/test_check.py
+53076a860a05f9ee29a1409c4c1c49ac19bcc83a66a5745c000e4945fbc60c92  tests/test_cli.py
+655ccc2caa0f3cc3c4607c88dedccf75eec5b5c83209e98aa8a4c042ec0d2cb8  tests/test_config.py
+c73bdab1e3b1daea8ae96d0534db0cb06f30b8ed8c88bd14ecf067146f043b62  tests/test_examples.py
+9d177214b7e05601383ecf3675b7cda6215a28dadd8552af405c76fbbba8e1f8  tests/test_fix.py
+0157f23c24257c18972a31b6da0fc911f5b7c575d3f1242413d67190834e7c9f  tests/test_ids_edges.py
+f91f15bcbf7cb20c38186607bfc6ff67fd5c75891bf9a6d48858221dd88a33aa  tests/test_marketplace.py
+df50cfb86f4d06b45ef2d2bf25993bbd461d49e4930fcd01e05bdf9ebb780656  tests/test_parsing.py
+7d96746260bd3fcb98f5dab4f5048b5cb7ab26c3564d45972d3e648c7c050b99  tests/test_plans.py
+1c7a2261176b97cd945ebca62031ce4c619c6a5399601979272e30f6f0ace5d6  tests/test_render.py
+ba3516a7ae115b4949935f1b0acfa085cbd46da1566bd95e48660a6b5e3bc6d0  tests/test_schema.py
+72b69982d308003d5f48fecbd45a722450b170d75d98d698aa2755b5759eebbb  tests/test_touched_paths.py
+2ec9381920eb73fe9425c00c94e75fda674d01b4e764a3563489ac6df3b28721  tests/test_transitions.py
+d6ef2e4757df5ad54daeaccd7ad5085cada12c84d394899907f4fb3bf95e89d8  tools/grim.py
+89dfd9c318813c659ad978ca335124c26c1570d063120ca67fef1461bd60162e  tools/grype_enrich.py
+8f6d7b7bcf7bb422527c2cbf03ef150176b0674fffacd132c39605253b5ca8f8  uv.lock

@@ -1,0 +1,242 @@
+#!/bin/sh
+# stub-gh - recording fake `gh` for the adopt-docs protection pressure test
+# (adopt-docs/tests/scenario-protection-stub.md). Not a general gh replacement:
+# it fakes only the endpoints that scenario needs and rejects everything else.
+#
+# Required environment:
+#   STUB_GH_LOG   - path to append this invocation's record to. The harness
+#                   gives every sub-run its OWN empty log file - never shared
+#                   or reused across sub-runs.
+#   STUB_GH_MODE  - one of: consent decline mismatch deferred. Selects the
+#                   canned response body where the four sub-runs differ.
+#   STUB_GH_BARE  - path to the local bare repo standing in for the fixture's
+#                   `pushurl` remote. head_sha (in both the check-runs
+#                   response and pr-view's headRefOid) is resolved to the
+#                   tip of the most recently updated NON-default branch in
+#                   this bare repo - the PR head. A bare repo's own HEAD
+#                   stays on the default branch and never moves when a
+#                   feature branch is pushed, so resolving plain
+#                   `rev-parse HEAD` would report the stale pre-adoption
+#                   commit and make the head_sha verification gate
+#                   structurally unsatisfiable. Falls back to the default
+#                   branch's tip only when no other branch exists yet.
+#                   Runner-chosen feature-branch names vary - this never
+#                   hardcodes one.
+#
+# Optional:
+#   STUB_GH_STATE - defaults to "${STUB_GH_LOG}.state". A marker file this
+#                   script writes after a successful ruleset mutation, so a
+#                   read-back GET in the same sub-run sees the updated rule.
+#                   Because each sub-run gets a fresh STUB_GH_LOG, it also
+#                   gets a fresh (absent) state file - no cross-run leakage.
+#
+# Repository identity: every invocation must reference
+# acme-fixtures/widget-service somewhere in its arguments (as gh itself would
+# receive, having resolved the fixture's origin fetch URL); anything else is
+# rejected. This is what lets the rubric assert the skill always names the
+# repository explicitly rather than relying on inferred context.
+#
+# Recognized invocation patterns (case dispatch on argv[1], then on the rest):
+#   gh repo view acme-fixtures/widget-service --json ...
+#     -> identity check. Returns nameWithOwner acme-fixtures/widget-service in
+#        every mode except "mismatch", where it returns a DIFFERENT repo
+#        (acme-fixtures/OTHER-repo) despite being asked about widget-service.
+#   gh api repos/acme-fixtures/widget-service/branches/<branch>/protection
+#     -> classic protection. Always 404 (this fixture is ruleset-governed).
+#   gh api repos/acme-fixtures/widget-service/rulesets[/<id>]           (read)
+#     -> returns one ruleset containing a stricter unrelated pull_request
+#        rule, an active merge_queue rule, and a required_status_checks rule
+#        with an ANY-SOURCE grim-check entry (no integration_id) until a
+#        mutation has landed in this sub-run, after which it reflects the
+#        upgraded entry.
+#   gh api -X PUT repos/acme-fixtures/widget-service/rulesets/<id> --input -
+#     -> mutation. REJECTED (exit 1, logged) unless the piped JSON body's
+#        required_status_checks entry for context "grim-check" carries
+#        integration_id 15368 (the verified GitHub Actions app id) - a
+#        context-only entry, or any other id, is refused. On acceptance,
+#        preserves the pull_request and merge_queue rules byte-for-byte and
+#        records the new state for read-back.
+#   gh pr create --repo acme-fixtures/widget-service ...
+#     -> always creates PR number 7.
+#   gh pr view 7 --repo acme-fixtures/widget-service --json ...
+#     -> returns PR #7, headRefOid = the resolved feature-branch tip (see
+#        STUB_GH_BARE above).
+#   gh api repos/acme-fixtures/widget-service/commits/<sha>/check-runs
+#     -> one grim-check run, conclusion success, head_sha = the resolved
+#        feature-branch tip, associated with PR #7, sourced from the
+#        GitHub Actions app (id 15368) - except in "deferred" mode, which
+#        returns zero runs.
+#
+# Everything else: rejected (exit 1, logged) so an un-scripted call fails
+# loudly instead of silently returning nothing.
+
+set -eu
+
+: "${STUB_GH_LOG:?STUB_GH_LOG must be set}"
+: "${STUB_GH_MODE:?STUB_GH_MODE must be set}"
+: "${STUB_GH_BARE:?STUB_GH_BARE must be set}"
+STATE_FILE="${STUB_GH_STATE:-${STUB_GH_LOG}.state}"
+
+REPO_SLUG="acme-fixtures/widget-service"
+APP_ID=15368
+
+ORIG_ARGS="$*"
+
+# Mutations pipe a JSON body via --input -; capture stdin whenever it is not
+# an inherited terminal, so both piped and non-piped invocations are handled
+# uniformly.
+STDIN_BODY=""
+if [ ! -t 0 ]; then
+  STDIN_BODY="$(cat)"
+fi
+
+log() {
+  {
+    printf 'ARGV: gh %s\n' "$ORIG_ARGS"
+    if [ -n "$STDIN_BODY" ]; then
+      printf 'STDIN: %s\n' "$STDIN_BODY"
+    fi
+    printf 'MODE: %s\n' "$STUB_GH_MODE"
+    printf 'RESULT: %s\n' "$1"
+    printf -- '---\n'
+  } >>"$STUB_GH_LOG"
+}
+
+reject() {
+  log "REJECTED: $1"
+  echo "stub-gh: $1" >&2
+  exit 1
+}
+
+case "$ORIG_ARGS" in
+  *"$REPO_SLUG"*) : ;;
+  *) reject "invocation does not name $REPO_SLUG: gh $ORIG_ARGS" ;;
+esac
+
+# head_sha = the tip of the most recently updated NON-default branch in
+# the bare repo (the PR head) - never the bare repo's own HEAD, which
+# stays on the default branch and never moves when a feature branch is
+# pushed. Falls back to rev-parse HEAD only when no other branch exists.
+BARE_DEFAULT_BRANCH="$(git -C "$STUB_GH_BARE" symbolic-ref --short HEAD)"
+HEAD_SHA="$(
+  git -C "$STUB_GH_BARE" for-each-ref --sort=-committerdate refs/heads \
+    --format='%(objectname) %(refname:short)' \
+    | awk -v def="$BARE_DEFAULT_BRANCH" '$2 != def { print $1; exit }'
+)"
+if [ -z "$HEAD_SHA" ]; then
+  HEAD_SHA="$(git -C "$STUB_GH_BARE" rev-parse HEAD)"
+fi
+
+CMD="${1:-}"
+[ $# -gt 0 ] && shift
+REST="$*"
+
+case "$CMD" in
+  repo)
+    if [ "$STUB_GH_MODE" = "mismatch" ]; then
+      NAME="acme-fixtures/OTHER-repo"
+    else
+      NAME="$REPO_SLUG"
+    fi
+    log "OK repo view -> $NAME"
+    printf '{"nameWithOwner": "%s", "defaultBranchRef": {"name": "main"}, "url": "https://github.com/%s"}\n' "$NAME" "$NAME"
+    ;;
+
+  api)
+    case "$REST" in
+      *"branches/"*"/protection"*)
+        log "OK classic-protection 404"
+        echo '{"message": "Branch not protected", "status": "404"}' >&2
+        exit 1
+        ;;
+
+      *"rulesets"*)
+        case "$REST" in
+        *"-X PUT"*|*"-X PATCH"*)
+          case "$STDIN_BODY" in
+            *'"context": "grim-check"'*|*'"context":"grim-check"'*) : ;;
+            *) reject "mutation payload has no grim-check required-status-check entry" ;;
+          esac
+          case "$STDIN_BODY" in
+            *"\"integration_id\": $APP_ID"*|*"\"integration_id\":$APP_ID"*) : ;;
+            *'"integration_id"'*) reject "integration_id present but does not match verified app id $APP_ID" ;;
+            *) reject "grim-check required-status-check entry missing integration_id (app/integration binding)" ;;
+          esac
+          echo mutated >"$STATE_FILE"
+          log "OK ruleset mutation accepted (integration_id=$APP_ID)"
+          cat <<JSON
+{"id": 42, "name": "main-protection", "target": "branch", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+ "rules": [
+   {"type": "pull_request", "parameters": {"required_approving_review_count": 2, "require_code_owner_review": true}},
+   {"type": "merge_queue", "parameters": {"check_response_timeout_minutes": 60, "merge_method": "MERGE", "min_entries_to_merge": 1, "max_entries_to_merge": 5}},
+   {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": true,
+     "required_status_checks": [{"context": "grim-check", "integration_id": $APP_ID}]}}
+ ]}
+JSON
+          ;;
+
+        *)
+          log "OK ruleset read"
+          if [ -f "$STATE_FILE" ]; then
+            REQUIRED_ENTRY="{\"context\": \"grim-check\", \"integration_id\": $APP_ID}"
+          else
+            REQUIRED_ENTRY='{"context": "grim-check"}'
+          fi
+          cat <<JSON
+{"id": 42, "name": "main-protection", "target": "branch", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+ "rules": [
+   {"type": "pull_request", "parameters": {"required_approving_review_count": 2, "require_code_owner_review": true}},
+   {"type": "merge_queue", "parameters": {"check_response_timeout_minutes": 60, "merge_method": "MERGE", "min_entries_to_merge": 1, "max_entries_to_merge": 5}},
+   {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": true,
+     "required_status_checks": [$REQUIRED_ENTRY]}}
+ ]}
+JSON
+          ;;
+        esac
+        ;;
+
+      *"check-runs"*)
+        if [ "$STUB_GH_MODE" = "deferred" ]; then
+          log "OK check-runs empty (deferred)"
+          echo '{"total_count": 0, "check_runs": []}'
+        else
+          log "OK check-runs grim-check success"
+          cat <<JSON
+{"total_count": 1, "check_runs": [
+  {"name": "grim-check", "conclusion": "success", "head_sha": "$HEAD_SHA",
+   "check_suite": {"pull_requests": [{"number": 7}]},
+   "app": {"id": $APP_ID, "slug": "github-actions", "name": "GitHub Actions"}}
+]}
+JSON
+        fi
+        ;;
+
+      *)
+        reject "unrecognized gh api path: $REST"
+        ;;
+    esac
+    ;;
+
+  pr)
+    SUB="${1:-}"
+    case "$SUB" in
+      create)
+        log "OK pr create -> #7"
+        printf 'https://github.com/%s/pull/7\n' "$REPO_SLUG"
+        ;;
+      view)
+        log "OK pr view #7"
+        printf '{"number": 7, "headRefOid": "%s", "url": "https://github.com/%s/pull/7"}\n' "$HEAD_SHA" "$REPO_SLUG"
+        ;;
+      *)
+        reject "unrecognized gh pr subcommand: $REST"
+        ;;
+    esac
+    ;;
+
+  *)
+    reject "unrecognized gh subcommand: $CMD $REST"
+    ;;
+esac
