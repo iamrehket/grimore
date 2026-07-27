@@ -1,7 +1,7 @@
 ---
 id: nongoal-host-abstraction-framework
 type: nongoal
-status: draft
+status: current
 date: 2026-07-27
 ---
 

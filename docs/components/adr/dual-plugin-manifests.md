@@ -1,7 +1,7 @@
 ---
 id: adr-dual-plugin-manifests
 type: adr
-status: draft
+status: current
 paths: [.claude-plugin/, .codex-plugin/, .github/scripts/check_version_bump.py, tests/test_marketplace.py, tests/test_version_bump.py]
 date: 2026-07-27
 ---

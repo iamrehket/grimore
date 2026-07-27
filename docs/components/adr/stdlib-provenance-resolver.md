@@ -1,7 +1,7 @@
 ---
 id: adr-stdlib-provenance-resolver
 type: adr
-status: draft
+status: current
 paths: [adopt-docs/SKILL.md, adopt-docs/scripts/, tests/test_adopt_docs.py]
 date: 2026-07-27
 ---
