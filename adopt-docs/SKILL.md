@@ -299,35 +299,25 @@ bundled file's bytes unchanged:
 # Vendored from iamrehket/grimore by adopt-docs on <YYYY-MM-DD>. Source: <identity>.
 ```
 
-`<YYYY-MM-DD>` is today's date. `<identity>` comes from this ladder,
-tried in order, first rung that fires wins:
+`<YYYY-MM-DD>` is today's date. Resolve `<skill-dir>` from this skill's
+own location, then obtain `<identity>` by running exactly:
 
-1. **Git identity** - accepted *only* when `git -C <skill-dir>
-   rev-parse --show-toplevel` (run from this skill's own directory)
-   succeeds, the resolved root itself carries a
-   `.claude-plugin/plugin.json` whose `name` is `"grimore"`, and that
-   root is different from the adopting target's own root (`git -C
-   <target> rev-parse --show-toplevel`). When all three hold, the
-   identity is the commit at that verified root (`git -C <verified-root>
-   rev-parse HEAD`). **Never resolve identity by running `git -C
-   <skill-dir> rev-parse HEAD` without the toplevel-and-manifest
-   verification first** - an unqualified `git -C <dir> rev-parse HEAD`
-   resolves through parent directories when `<dir>` has no `.git` of its
-   own, so a bundle nested inside the target repo's tree, with no `.git`
-   of its own, would otherwise silently resolve to and stamp the
-   *target's own* commit as if it were grimore's. That is exactly the
-   failure this rung exists to prevent.
-2. **Bundle manifest** - when rung 1 does not fire (typically: the
-   bundle carries no `.git` at all, the common packaged-plugin case),
-   read `<skill-dir>/../.claude-plugin/plugin.json`'s `version` field and
-   stamp `grimore plugin v<version>`.
-3. **Unknown** - when neither rung above produces a usable value, stamp
-   the literal `unknown`.
+```bash
+uv run --no-project python -I -S \
+  <skill-dir>/scripts/resolve_provenance.py \
+  --skill-dir <skill-dir> \
+  --target <target>
+```
 
-The identity is never invented and never the adopting repository's own
-HEAD under any circumstance - rungs 1 and 2 are the only two sources of
-a real identity, and rung 1's toplevel-and-manifest gate is what keeps a
-nested, `.git`-less bundle from ever being confused with the target.
+Capture the command's single stdout line as `<identity>`. Show any stderr
+warning to the user without mixing it into the stamp. A successful
+`unknown` result is the safe fallback and adoption continues with that
+literal identity. A nonzero exit is an execution failure: stop before
+vendoring and report the error.
+
+Use the helper's output as-is. Never substitute, infer, or independently
+resolve an identity, and in particular never use the adopting target's own
+HEAD as the source identity.
 
 ### Layout
 
