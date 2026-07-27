@@ -4,12 +4,19 @@ The checker is a CI entry point rather than an importable module, so these
 drive it as a subprocess with the same environment CI supplies.
 """
 
+import importlib.util
 import json
 import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 CHECKER = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "check_version_bump.py"
+MANIFESTS = {
+    "claude": Path(".claude-plugin/plugin.json"),
+    "codex": Path(".codex-plugin/plugin.json"),
+}
 
 
 def git(root, *args):
@@ -18,18 +25,50 @@ def git(root, *args):
     return r.stdout
 
 
-def set_version(root, version):
-    path = root / ".claude-plugin" / "plugin.json"
+def manifest_data(version="0.2.0", **overrides):
+    data = {
+        "name": "grimore",
+        "version": version,
+        "description": "Grimore test plugin",
+        "author": {"name": "Test"},
+        "skills": ["./adopt-docs"],
+    }
+    data.update(overrides)
+    return data
+
+
+def write_manifest(root, host, version="0.2.0", **overrides):
+    path = root / MANIFESTS[host]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"name": "grimore", "version": version}) + "\n")
+    path.write_text(
+        json.dumps(manifest_data(version, **overrides), indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
-def repo(root):
+def set_version(root, version, hosts=("claude", "codex")):
+    for host in hosts:
+        path = root / MANIFESTS[host]
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["version"] = version
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def set_manifest_field(root, host, field, value):
+    path = root / MANIFESTS[host]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data[field] = value
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def repo(root, *, codex_at_base=True):
     """Init a repo at version 0.2.0, then branch; returns the base SHA."""
     git(root, "init", "-b", "main")
     git(root, "config", "user.email", "test@example.com")
     git(root, "config", "user.name", "Test")
-    set_version(root, "0.2.0")
+    write_manifest(root, "claude")
+    if codex_at_base:
+        write_manifest(root, "codex")
     (root / "adopt-docs").mkdir()
     (root / "adopt-docs" / "SKILL.md").write_text("base\n")
     (root / "docs").mkdir()
@@ -61,8 +100,19 @@ def check(root, base, title="", *args):
     return r.returncode, r.stdout + r.stderr
 
 
-def version_of(root):
-    return json.loads((root / ".claude-plugin" / "plugin.json").read_text())["version"]
+def version_of(root, host="claude"):
+    return json.loads((root / MANIFESTS[host]).read_text())["version"]
+
+
+def versions_of(root):
+    return {host: version_of(root, host) for host in MANIFESTS}
+
+
+def load_checker():
+    spec = importlib.util.spec_from_file_location("check_version_bump_under_test", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_exempt_only_change_passes(tmp_path):
@@ -320,15 +370,40 @@ def test_apply_counts_an_in_flight_message(tmp_path):
 
 def test_apply_preserves_manifest_formatting(tmp_path):
     base = repo(tmp_path)
+    original_modes = {
+        host: (tmp_path / path).stat().st_mode for host, path in MANIFESTS.items()
+    }
     (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-        '{\n  "name": "grimore",\n  "version": "0.2.0",\n  "author": "x"\n}\n'
+        '{\n  "name": "grimore",\n  "version": "0.2.0",\n'
+        '  "description": "Grimore test plugin",\n'
+        '  "author": {"name": "Test"},\n'
+        '  "skills": ["./adopt-docs"]\n}\n'
+    )
+    (tmp_path / ".codex-plugin" / "plugin.json").write_text(
+        '{"name":"grimore","version":"0.2.0",'
+        '"description":"Grimore test plugin","author":{"name":"Test"},'
+        '"skills":["./adopt-docs"]}\n'
     )
     commit(tmp_path, "chore: reformat")
     touch_skill(tmp_path)
     commit(tmp_path, "feat: thing")
     check(tmp_path, base, "feat: thing", "--apply")
-    text = (tmp_path / ".claude-plugin" / "plugin.json").read_text()
-    assert text == '{\n  "name": "grimore",\n  "version": "0.3.0",\n  "author": "x"\n}\n'
+    claude = (tmp_path / ".claude-plugin" / "plugin.json").read_text()
+    codex = (tmp_path / ".codex-plugin" / "plugin.json").read_text()
+    assert claude == (
+        '{\n  "name": "grimore",\n  "version": "0.3.0",\n'
+        '  "description": "Grimore test plugin",\n'
+        '  "author": {"name": "Test"},\n'
+        '  "skills": ["./adopt-docs"]\n}\n'
+    )
+    assert codex == (
+        '{"name":"grimore","version":"0.3.0",'
+        '"description":"Grimore test plugin","author":{"name":"Test"},'
+        '"skills":["./adopt-docs"]}\n'
+    )
+    assert {
+        host: (tmp_path / path).stat().st_mode for host, path in MANIFESTS.items()
+    } == original_modes
 
 
 def test_print_reports_the_target_without_writing(tmp_path):
@@ -370,3 +445,162 @@ def test_waiver_also_blocks_apply(tmp_path):
     assert code == 0
     assert "WAIVED" in out
     assert version_of(tmp_path) == "1.0.0"
+
+
+@pytest.mark.parametrize(
+    ("field", "codex_value"),
+    [
+        ("name", "not-grimore"),
+        ("description", "different"),
+        ("author", {"name": "Someone Else"}),
+        ("skills", ["./explain-diff", "./adopt-docs"]),
+        ("version", "0.2.1"),
+    ],
+)
+def test_check_rejects_shared_manifest_drift(tmp_path, field, codex_value):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_manifest_field(tmp_path, "codex", field, codex_value)
+    commit(tmp_path, "fix: thing")
+    code, out = check(tmp_path, base, "fix: thing")
+    assert code == 1
+    assert f"shared field {field!r}" in out
+
+
+def test_print_rejects_shared_manifest_drift(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_manifest_field(tmp_path, "codex", "description", "different")
+    commit(tmp_path, "fix: thing")
+    code, out = check(tmp_path, base, "fix: thing", "--print")
+    assert code == 1
+    assert "shared field 'description'" in out
+
+
+def test_exempt_only_change_still_rejects_manifest_drift(tmp_path):
+    base = repo(tmp_path)
+    (tmp_path / "docs" / "note.md").write_text("more\n")
+    commit(tmp_path, "docs: note")
+    set_manifest_field(tmp_path, "codex", "author", {"name": "Drift"})
+    code, out = check(tmp_path, base, "docs: note")
+    assert code == 1
+    assert "shared field 'author'" in out
+
+
+def test_apply_rejects_non_version_drift_without_writing(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_manifest_field(tmp_path, "codex", "description", "different")
+    commit(tmp_path, "feat: thing")
+    before = versions_of(tmp_path)
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 1
+    assert "shared field 'description'" in out
+    assert versions_of(tmp_path) == before
+
+
+def test_apply_accepts_version_only_drift_and_writes_both(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: thing")
+    set_version(tmp_path, "9.9.9", hosts=("codex",))
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 0
+    assert versions_of(tmp_path) == {"claude": "0.3.0", "codex": "0.3.0"}
+    assert "set" in out
+
+
+def test_bootstrap_uses_claude_base_when_codex_is_absent_at_base(tmp_path):
+    base = repo(tmp_path, codex_at_base=False)
+    write_manifest(tmp_path, "codex")
+    touch_skill(tmp_path)
+    commit(tmp_path, "feat: add Codex manifest")
+    code, out = check(tmp_path, base, "feat: add Codex manifest", "--apply")
+    assert code == 0
+    assert versions_of(tmp_path) == {"claude": "0.3.0", "codex": "0.3.0"}
+    assert "minor from 0.2.0" in out
+
+
+@pytest.mark.parametrize("missing_host", ["claude", "codex"])
+def test_missing_head_manifest_fails_after_both_exist_at_base(tmp_path, missing_host):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "fix: thing")
+    (tmp_path / MANIFESTS[missing_host]).unlink()
+    code, out = check(tmp_path, base, "fix: thing")
+    assert code == 1
+    assert str(MANIFESTS[missing_host]) in out
+
+
+@pytest.mark.parametrize(
+    "invalid_content",
+    [
+        "{",
+        "[]",
+        json.dumps({"name": "grimore"}),
+    ],
+)
+def test_invalid_head_manifest_fails_cleanly(tmp_path, invalid_content):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    commit(tmp_path, "fix: thing")
+    (tmp_path / MANIFESTS["codex"]).write_text(invalid_content, encoding="utf-8")
+
+    code, out = check(tmp_path, base, "fix: thing")
+
+    assert code == 1
+    assert str(MANIFESTS["codex"]) in out
+    assert "Traceback" not in out
+
+
+def test_manifest_exists_at_distinguishes_an_absent_path(tmp_path, monkeypatch):
+    base = repo(tmp_path, codex_at_base=False)
+    checker = load_checker()
+    monkeypatch.chdir(tmp_path)
+
+    assert checker.manifest_exists_at(base, MANIFESTS["claude"])
+    assert not checker.manifest_exists_at(base, MANIFESTS["codex"])
+
+
+def test_waiver_short_circuits_drift_and_apply_writes_neither(tmp_path):
+    base = repo(tmp_path)
+    touch_skill(tmp_path)
+    set_version(tmp_path, "9.9.9", hosts=("codex",))
+    commit(tmp_path, "feat: thing\n\nVersion-Waive: preserve deliberate mismatch")
+    before = versions_of(tmp_path)
+    code, out = check(tmp_path, base, "feat: thing", "--apply")
+    assert code == 0
+    assert "WAIVED" in out
+    assert versions_of(tmp_path) == before
+
+
+def test_atomic_write_restores_both_files_when_second_replace_fails(
+    tmp_path, monkeypatch
+):
+    checker = load_checker()
+    claude = tmp_path / "claude.json"
+    codex = tmp_path / "codex.json"
+    claude.write_text("claude original\n")
+    codex.write_text("codex original\n")
+    real_replace = checker.os.replace
+    calls = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated second replace failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(checker.os, "replace", fail_second_replace)
+
+    with pytest.raises(checker.AtomicWriteError, match="simulated second replace"):
+        checker.write_versions_atomically(
+            {
+                claude: "claude replacement\n",
+                codex: "codex replacement\n",
+            }
+        )
+
+    assert claude.read_text() == "claude original\n"
+    assert codex.read_text() == "codex original\n"

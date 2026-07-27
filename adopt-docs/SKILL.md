@@ -16,9 +16,9 @@ the charter-seeding interview, and the final commit/PR offer.
 Requirements doc: `doc-components/SCHEMA.md`. Templates:
 `doc-components/templates/`. CI recipe: `doc-components/CI.md`. Sibling
 skill: `align/SKILL.md` (the interview style below follows its
-one-question-at-a-time, AskUserQuestion-style discipline). Nothing here
-special-cases grimore's own repo - adopting grimore onto itself is a
-separate exercise, not this skill's job to detect or shortcut.
+one-question-at-a-time, capability-based choice discipline). Nothing here
+special-cases grimore's own repo - adopting grimore onto itself is a separate
+exercise, not this skill's job to detect or shortcut.
 
 When the repo is already `adopted` and merely unhealthy (lint/check
 failing), this is the wrong skill - hand it to finish-docs or ordinary
@@ -200,12 +200,12 @@ finish-docs), never to this skill's adoption-repair flow.
 
 ## Configuration interview
 
-The interview is not skippable and its answers are not something to
-infer from the opening request. Ask one question at a time,
-AskUserQuestion-style (2-4 concrete options where the choice is
-enumerable) - never a wall of questions in one message, and never proceed
-past a question without an explicit answer from the user. Cover, in this
-order:
+The interview is not skippable and its answers are not something to infer
+from the opening request. Ask one question at a time. Where a choice is
+enumerable, offer 2-4 concrete options through the host's structured-choice
+interaction when available and numbered plain text otherwise. Never ask a
+wall of questions in one message, and never proceed past a question without
+an explicit answer from the user. Cover, in this order:
 
 1. **Paths.** Present the four `DEFAULTS` (`components`, `current`,
    `specs`, `plans`) as one confirmable set, with the option to override
@@ -299,35 +299,25 @@ bundled file's bytes unchanged:
 # Vendored from iamrehket/grimore by adopt-docs on <YYYY-MM-DD>. Source: <identity>.
 ```
 
-`<YYYY-MM-DD>` is today's date. `<identity>` comes from this ladder,
-tried in order, first rung that fires wins:
+`<YYYY-MM-DD>` is today's date. Resolve `<skill-dir>` from this skill's
+own location, then obtain `<identity>` by running exactly:
 
-1. **Git identity** - accepted *only* when `git -C <skill-dir>
-   rev-parse --show-toplevel` (run from this skill's own directory)
-   succeeds, the resolved root itself carries a
-   `.claude-plugin/plugin.json` whose `name` is `"grimore"`, and that
-   root is different from the adopting target's own root (`git -C
-   <target> rev-parse --show-toplevel`). When all three hold, the
-   identity is the commit at that verified root (`git -C <verified-root>
-   rev-parse HEAD`). **Never resolve identity by running `git -C
-   <skill-dir> rev-parse HEAD` without the toplevel-and-manifest
-   verification first** - an unqualified `git -C <dir> rev-parse HEAD`
-   resolves through parent directories when `<dir>` has no `.git` of its
-   own, so a bundle nested inside the target repo's tree, with no `.git`
-   of its own, would otherwise silently resolve to and stamp the
-   *target's own* commit as if it were grimore's. That is exactly the
-   failure this rung exists to prevent.
-2. **Bundle manifest** - when rung 1 does not fire (typically: the
-   bundle carries no `.git` at all, the common packaged-plugin case),
-   read `<skill-dir>/../.claude-plugin/plugin.json`'s `version` field and
-   stamp `grimore plugin v<version>`.
-3. **Unknown** - when neither rung above produces a usable value, stamp
-   the literal `unknown`.
+```bash
+uv run --no-project python -I -S \
+  <skill-dir>/scripts/resolve_provenance.py \
+  --skill-dir <skill-dir> \
+  --target <target>
+```
 
-The identity is never invented and never the adopting repository's own
-HEAD under any circumstance - rungs 1 and 2 are the only two sources of
-a real identity, and rung 1's toplevel-and-manifest gate is what keeps a
-nested, `.git`-less bundle from ever being confused with the target.
+Capture the command's single stdout line as `<identity>`. Show any stderr
+warning to the user without mixing it into the stamp. A successful
+`unknown` result is the safe fallback and adoption continues with that
+literal identity. A nonzero exit is an execution failure: stop before
+vendoring and report the error.
+
+Use the helper's output as-is. Never substitute, infer, or independently
+resolve an identity, and in particular never use the adopting target's own
+HEAD as the source identity.
 
 ### Layout
 
@@ -395,8 +385,8 @@ later, but the reason itself is not part of the rendered text:
 - The glossary clause restates SCHEMA.md's terminology-governs-synonyms
   rule for the harness file, rather than leaving it implicit.
 - The `spec:` frontmatter clause and the specs/plans redirect keep this
-  project's superpowers-produced planning artifacts inside the adopted
-  layout instead of the upstream tool's own default paths.
+  project's agent-workflow planning artifacts inside the adopted layout
+  instead of an external workflow's own default paths.
 - The three merge-discipline rules are `doc-components/CI.md`'s recipe,
   restated verbatim (see Merge discipline and CI workflow, below, for the
   workflow file that makes rule 2 and rule 3 true).
@@ -696,13 +686,14 @@ component, then move to the next type in the fixed order. Never skip a
 disabled type silently; the one-line statement is mandatory even when the
 user never raises the topic themselves.
 
-**One question at a time, AskUserQuestion-style**, exactly as the
-configuration interview above: for each enabled type in turn, ask whether
-the user has a settled instance to offer right now, preferring 2-4
-concrete choices over an open prompt (for example: "Anything to capture
-for use cases? / Yes - describe it / Not yet / Skip use cases"). Never a
-wall of questions, never more than one type in flight at once, never
-proceed past a question without an explicit answer.
+**One question at a time**, exactly as in the configuration interview above:
+for each enabled type in turn, ask whether the user has a settled instance to
+offer right now, preferring 2-4 concrete choices over an open prompt. Use the
+host's structured-choice interaction when available and numbered plain text
+otherwise (for example: "Anything to capture for use cases? 1. Yes - describe
+it 2. Not yet 3. Skip use cases"). Never ask a wall of questions, never have
+more than one type in flight at once, and never proceed past a question
+without an explicit answer.
 
 **Settled vs. speculative - asked, never inferred.** When the user states
 a use case, constraint, non-goal, or term in their own words, do not

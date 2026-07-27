@@ -5,7 +5,10 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 MARKETPLACE = REPO / ".claude-plugin" / "marketplace.json"
-PLUGIN = REPO / ".claude-plugin" / "plugin.json"
+CLAUDE_PLUGIN = REPO / ".claude-plugin" / "plugin.json"
+CODEX_PLUGIN = REPO / ".codex-plugin" / "plugin.json"
+NATIVE_PLUGINS = (CLAUDE_PLUGIN, CODEX_PLUGIN)
+SHARED_FIELDS = ("name", "version", "description", "author", "skills")
 
 
 def load_json(path: Path) -> dict:
@@ -20,7 +23,7 @@ def skill_frontmatter(skill_dir: Path) -> dict:
 
 
 def declared_skill_dirs() -> list[Path]:
-    return [REPO / rel for rel in load_json(PLUGIN)["skills"]]
+    return [REPO / rel for rel in load_json(CLAUDE_PLUGIN)["skills"]]
 
 
 def test_marketplace_manifest_shape():
@@ -32,13 +35,29 @@ def test_marketplace_manifest_shape():
     assert entry["source"] == "./"
 
 
-def test_plugin_manifest_matches_marketplace_entry():
-    plugin = load_json(PLUGIN)
+def test_native_plugin_manifests_match():
+    claude = load_json(CLAUDE_PLUGIN)
+    codex = load_json(CODEX_PLUGIN)
+    assert isinstance(claude, dict)
+    assert isinstance(codex, dict)
+    for field in SHARED_FIELDS:
+        assert field in claude, f"{CLAUDE_PLUGIN} missing shared field {field!r}"
+        assert field in codex, f"{CODEX_PLUGIN} missing shared field {field!r}"
+        assert codex[field] == claude[field], (
+            f"shared field {field!r} differs between native manifests"
+        )
+
+
+def test_plugin_manifests_match_marketplace_entry():
+    plugins = [load_json(path) for path in NATIVE_PLUGINS]
     [entry] = load_json(MARKETPLACE)["plugins"]
-    assert plugin["name"] == entry["name"]
-    assert plugin["skills"], "plugin must declare at least one skill path"
-    for rel in plugin["skills"]:
-        assert rel.startswith("./"), f"skill path {rel!r} must be plugin-root-relative"
+    assert {plugin["name"] for plugin in plugins} == {entry["name"]}
+    for path, plugin in zip(NATIVE_PLUGINS, plugins, strict=True):
+        assert plugin["skills"], f"{path} must declare at least one skill path"
+        for rel in plugin["skills"]:
+            assert rel.startswith("./"), (
+                f"skill path {rel!r} in {path} must be plugin-root-relative"
+            )
 
 
 def test_declared_skills_exist_with_valid_frontmatter():

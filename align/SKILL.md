@@ -1,19 +1,20 @@
 ---
 name: align
-description: Use when brainstorming or designing a feature, or when someone says "align on", "let's design", or "start a spec". In a project adopting doc components, this replaces superpowers:brainstorming.
+description: Use when brainstorming or designing a feature, or when someone says "align on", "let's design", or "start a spec". In a project adopting doc components, it captures settled decisions inline.
 ---
 
 # Align: Interview With Inline Capture
 
-Turn an idea into a spec through one-question-at-a-time dialogue, the same
-way superpowers:brainstorming does - but in a project that stores its
-decisions as components, capture cannot wait for a write-up at the end. It
-happens the instant something settles, mid-conversation, or it doesn't
-happen at all.
+Turn an idea into a spec through one-question-at-a-time dialogue. In a
+project that stores its decisions as components, capture cannot wait for a
+write-up at the end. It happens the instant something settles,
+mid-conversation, or it doesn't happen at all.
 
 When NOT to use this skill: if the project has no component store (no
-`.grimore.toml` and no components directory), use superpowers:brainstorming
-instead - do not create a component tree nobody asked for.
+`.grimore.toml` and no components directory), use an available general
+design workflow instead. If none exists, conduct the same
+one-question-at-a-time interview yourself without creating components or a
+component tree nobody asked for.
 
 ## Session flow
 
@@ -27,10 +28,11 @@ instead - do not create a component tree nobody asked for.
    `docs/components/` and `docs/specs/`.
 
 2. **Interview.** Ask one question at a time - never a wall of questions in
-   a single message. Prefer multiple-choice (2-4 concrete options,
-   AskUserQuestion-style) over open-ended; a decision is easier to make
-   from options than from a blank prompt. Cover, in rough order: purpose
-   (why now, what hurts), actors and use cases, constraints (hard limits
+   a single message. Prefer 2-4 concrete options over an open prompt. Use a
+   structured-choice interaction when available.
+   Use numbered plain text otherwise. A decision is easier to make from
+   options than from a blank prompt. Cover, in rough order: purpose (why
+   now, what hurts), actors and use cases, constraints (hard limits
    accepted), success criteria, and explicit exclusions. The order is a
    guide, not a script - follow the user's energy; if they volunteer a
    constraint while answering a purpose question, take it there. The
@@ -39,7 +41,8 @@ instead - do not create a component tree nobody asked for.
 3. **Approaches.** Once purpose, constraints, and success criteria are
    reasonably clear, propose 2-3 concrete approaches. Make a recommendation
    and name the trade-off each one accepts - don't hand over a menu without
-   an opinion. Let the user choose via another multiple-choice question.
+   an opinion. Let the user choose using the same structured-choice or
+   numbered-plain-text fallback.
 
 4. **Spec.** Copy `doc-components/templates/spec.md` into the project's
    configured specs dir under a dated filename. The `components:`
@@ -58,11 +61,11 @@ instead - do not create a component tree nobody asked for.
    and re-run until it comes back clean or the user overrides, then get the
    user's sign-off on the spec.
 
-6. **Handoff.** Offer superpowers:writing-plans to turn the signed-off spec
-   into an implementation plan. The plan is authored from
-   `doc-components/templates/plan.md` and carries `spec:` frontmatter
-   pointing at the spec just written; align does not author the plan
-   itself.
+6. **Handoff.** Offer an available implementation-plan workflow to turn the
+   signed-off spec into an implementation plan. If none exists, author the
+   configured plan yourself from `doc-components/templates/plan.md` and the
+   project's conventions. In either case, the plan carries `spec:`
+   frontmatter pointing at the spec just written.
 
 ## Inline capture (the point of this skill)
 
