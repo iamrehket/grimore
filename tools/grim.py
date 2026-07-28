@@ -94,6 +94,14 @@ def load_config(root: Path) -> Config:
             raise ConfigError(
                 f".grimore.toml: {key} must resolve inside the project root, got {p}"
             )
+    # Specs and plans are walked as one pass and each file takes a single role,
+    # so an overlap would silently classify every plan as a spec: plan-specific
+    # validation and banner inheritance would never run. Fail loudly instead.
+    spec_dir, plan_dir = paths["specs"].resolve(), paths["plans"].resolve()
+    if spec_dir == plan_dir or spec_dir.is_relative_to(plan_dir) or plan_dir.is_relative_to(spec_dir):
+        raise ConfigError(
+            f".grimore.toml: specs and plans must not overlap, got {paths['specs']} and {paths['plans']}"
+        )
     return Config(
         root=root,
         components=paths["components"],
@@ -577,7 +585,9 @@ IMPLEMENTED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\(PR #(\d+)\))?$")
 # known-wrong, and writing a summary of it would bake that into a frozen
 # document. Same reasoning run_check gives for refusing to byte-compare a
 # broken store. E090 is deliberately absent: it is the drift this repairs.
-BANNER_BLOCKING_CODES = frozenset({"E020", "E030", "E031", "E091", "E092", "E093"})
+BANNER_BLOCKING_CODES = frozenset(
+    {"E020", "E030", "E031", "E091", "E092", "E093", "E094"}
+)
 
 
 @dataclasses.dataclass
@@ -605,18 +615,22 @@ def supersede_index(store: Store) -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in out.items()}
 
 
-def resolve_live_successor(
+def resolve_live_successors(
     cid: str, index: dict[str, list[str]], status_by_id: dict[str, str]
-) -> str | None:
-    """Nearest current component reachable by following supersede edges forward.
+) -> list[str]:
+    """Every current component reachable by following supersede edges forward.
 
-    Breadth-first so the nearest successor wins, sorted at each level so the
-    answer does not depend on store order. The visited set is mandatory, not
-    defensive: check_edges rejects only self-supersede and missing targets, so
-    two mutually-superseding current components lint clean and would otherwise
-    loop here forever.
+    Returns ALL of them, sorted, rather than the nearest one. A forked chain
+    can reach two live endpoints without tripping E031, which only inspects a
+    target's immediate successors - so returning the first match would state
+    one successor as authoritative while silently dropping the other.
+
+    The visited set is mandatory, not defensive: check_edges rejects only
+    self-supersede and missing targets, so two mutually-superseding components
+    lint clean and would otherwise loop here forever.
     """
     seen = {cid}
+    found: set[str] = set()
     frontier = list(index.get(cid, ()))
     while frontier:
         nxt: list[str] = []
@@ -625,10 +639,11 @@ def resolve_live_successor(
                 continue
             seen.add(succ)
             if status_by_id.get(succ) == "current":
-                return succ
+                found.add(succ)  # an endpoint; nothing supersedes a live node
+                continue
             nxt.extend(index.get(succ, ()))
         frontier = nxt
-    return None
+    return sorted(found)
 
 
 def parse_implemented(value) -> tuple[str, str | None]:
@@ -707,7 +722,7 @@ def derive_banner(
             lines.append("> Superseded.")
         else:
             pairs = ", ".join(
-                f"{c} -> {resolve_live_successor(c, index, status_by_id) or 'abandoned'}"
+                f"{c} -> {' or '.join(resolve_live_successors(c, index, status_by_id)) or 'abandoned'}"
                 for c in gone
             )
             lines.append(f"> Superseded in part: {pairs}")
@@ -789,7 +804,10 @@ def analyze_working_layer(
         if not isinstance(raw_components, list) or not all(
             isinstance(c, str) for c in raw_components
         ):
-            out.append(warning("W094", doc.rel, "components: is not a list of strings"))
+            # An error, not a warning: derivation is skipped below, so no E090
+            # can fire for this file, and a warning would let grim check pass
+            # over a stale or empty banner. Same reasoning as E091.
+            out.append(error("E094", doc.rel, "components: is not a list of strings"))
             continue
         implemented = None
         if "implemented" in fm:
@@ -869,11 +887,15 @@ def apply_banner_fixes(
             continue
         if path.is_symlink():
             raise ConfigError(f"{rel} is a symlink; refusing to write through it")
-        text = path.read_text(encoding="utf-8")
-        span = _banner_span(text)
+        # Byte-level, not read_text/write_text: text mode normalizes CRLF to LF
+        # on read and would rewrite the whole file with translated endings,
+        # changing frozen bytes outside the block. Decoding read_bytes()
+        # performs no newline translation, so the splice touches only the span.
+        raw = path.read_bytes().decode("utf-8")
+        span = _banner_span(raw)
         if span is None:
             continue
-        path.write_text(text[: span[0]] + interior + text[span[1] :], encoding="utf-8")
+        path.write_bytes((raw[: span[0]] + interior + raw[span[1] :]).encode("utf-8"))
         fixed.append(rel)
     return fixed
 

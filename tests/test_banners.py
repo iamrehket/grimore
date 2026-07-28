@@ -163,9 +163,14 @@ def test_unknown_component_id_is_reported(tmp_path):
     assert "Unknown references: adr-ghost." in derived(tmp_path)
 
 
-def test_components_not_a_list_of_strings_is_w094(tmp_path):
+def test_components_not_a_list_of_strings_is_a_blocking_error(tmp_path):
+    """Must be an error, not a warning. Derivation is skipped for this file, so
+    no E090 can fire; a warning would let grim check pass over a stale or empty
+    banner - the exact hole the feature exists to close."""
     write_spec(tmp_path, raw_fm="components: {a: b}")
-    assert "W094" in codes(tmp_path)
+    findings, desired = analyze(tmp_path)
+    assert [f.code for f in findings if f.level == "error"] == ["E094"]
+    assert desired == {}
 
 
 def test_banner_is_never_empty(tmp_path):
@@ -206,6 +211,22 @@ def test_supersede_cycle_terminates(tmp_path):
     write_component(tmp_path, "adr", "kept")
     write_spec(tmp_path, raw_fm='components: [adr-seed, adr-kept]\nimplemented: "2026-07-24"')
     assert "adr-seed -> abandoned" in derived(tmp_path)
+
+
+def test_forked_chain_names_every_live_successor(tmp_path):
+    """A fork reaching two current endpoints does not trip E031, which inspects
+    only immediate successors. Returning the first match would state one as
+    authoritative and silently drop the other."""
+    write_component(tmp_path, "adr", "old", status="superseded")
+    write_component(tmp_path, "adr", "b", status="superseded", extra={"supersedes": "[adr-old]"})
+    write_component(tmp_path, "adr", "c", status="superseded", extra={"supersedes": "[adr-old]"})
+    write_component(tmp_path, "adr", "alpha", extra={"supersedes": "[adr-b]"})
+    write_component(tmp_path, "adr", "omega", extra={"supersedes": "[adr-c]"})
+    write_component(tmp_path, "adr", "kept")
+    write_spec(tmp_path, raw_fm='components: [adr-old, adr-kept]\nimplemented: "2026-07-24"')
+    cfg = grim.load_config(tmp_path)
+    assert grim.check_edges(grim.load_store(cfg)) == []  # E031 does not see it
+    assert "adr-old -> adr-alpha or adr-omega" in derived(tmp_path)
 
 
 def test_successor_choice_is_deterministic_under_reordering(tmp_path):
@@ -292,6 +313,29 @@ def test_missing_block_warns_and_is_never_inserted(tmp_path):
     assert "W090" in codes(tmp_path)
     fix(tmp_path)
     assert p.read_text(encoding="utf-8") == before
+
+
+def test_crlf_bytes_outside_the_block_are_preserved(tmp_path):
+    """read_text/write_text normalizes CRLF to LF and would rewrite the whole
+    file, changing frozen bytes. Asserted on raw bytes, since text-mode reads
+    hide the very translation under test."""
+    write_component(tmp_path, "adr", "x")
+    d = tmp_path / "docs" / "specs"
+    d.mkdir(parents=True)
+    p = d / "a.md"
+    p.write_bytes(
+        "---\r\ncomponents: [adr-x]\r\n---\r\n\r\n"
+        f"{grim.BANNER_OPEN}\r\n{grim.BANNER_CLOSE}\r\n\r\n# Spec\r\n\r\nProse.\r\n".encode()
+    )
+    before = p.read_bytes()
+    assert fix(tmp_path) == ["docs/specs/a.md"]
+    after = p.read_bytes()
+    tail_before = before.split(grim.BANNER_CLOSE.encode(), 1)[1]
+    tail_after = after.split(grim.BANNER_CLOSE.encode(), 1)[1]
+    assert tail_after == tail_before
+    assert after.split(grim.BANNER_OPEN.encode(), 1)[0] == before.split(
+        grim.BANNER_OPEN.encode(), 1
+    )[0]
 
 
 def test_plan_missing_block_is_w091(tmp_path):
