@@ -5,3 +5,6 @@ __pycache__/
 .playwright-mcp/
 .idea/
 .venv/
+
+.scratch/
+.handoffs/
