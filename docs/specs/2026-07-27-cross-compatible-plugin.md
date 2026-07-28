@@ -6,6 +6,7 @@ components:
 ---
 
 <!-- grim:status -->
+> **Not yet implemented.**
 <!-- /grim:status -->
 
 # Cross-Compatible Plugin - Design

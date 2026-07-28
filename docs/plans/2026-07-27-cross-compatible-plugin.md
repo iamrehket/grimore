@@ -3,6 +3,7 @@ spec: docs/specs/2026-07-27-cross-compatible-plugin.md
 ---
 
 <!-- grim:status -->
+> **Not yet implemented.**
 <!-- /grim:status -->
 
 # Cross-Compatible Plugin (IAM-56) Implementation Plan

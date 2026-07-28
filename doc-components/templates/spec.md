@@ -1,6 +1,6 @@
 ---
 components: []            # component IDs created during the align session
-# implemented: <YYYY-MM-DD (PR #N)>   — added once by finish-docs; never by hand
+# implemented: "YYYY-MM-DD (PR #N)"   — MUST be quoted; added once by finish-docs, never by hand
 ---
 
 <!-- grim:status -->
