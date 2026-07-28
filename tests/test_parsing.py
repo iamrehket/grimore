@@ -76,6 +76,6 @@ def test_non_utf8_plan_is_w060(tmp_path):
     d.mkdir(parents=True)
     (d / "binary.md").write_bytes(b"\xff\xfe not a plan")
     cfg = grim.load_config(tmp_path)
-    findings = grim.check_plans(cfg)
+    findings, _ = grim.analyze_working_layer(cfg, grim.load_store(cfg))
     assert [f.code for f in findings] == ["W060"]
     assert "UTF-8" in findings[0].message

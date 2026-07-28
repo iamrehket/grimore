@@ -94,6 +94,14 @@ def load_config(root: Path) -> Config:
             raise ConfigError(
                 f".grimore.toml: {key} must resolve inside the project root, got {p}"
             )
+    # Specs and plans are walked as one pass and each file takes a single role,
+    # so an overlap would silently classify every plan as a spec: plan-specific
+    # validation and banner inheritance would never run. Fail loudly instead.
+    spec_dir, plan_dir = paths["specs"].resolve(), paths["plans"].resolve()
+    if spec_dir == plan_dir or spec_dir.is_relative_to(plan_dir) or plan_dir.is_relative_to(spec_dir):
+        raise ConfigError(
+            f".grimore.toml: specs and plans must not overlap, got {paths['specs']} and {paths['plans']}"
+        )
     return Config(
         root=root,
         components=paths["components"],
@@ -567,32 +575,329 @@ def check_avoid_terms(store: Store) -> list[Finding]:
     return out
 
 
-def check_plans(cfg: Config) -> list[Finding]:
-    out: list[Finding] = []
-    if not cfg.plans.is_dir():
-        return out
-    for path in sorted(cfg.plans.rglob("*.md")):
-        rel = path.relative_to(cfg.root).as_posix()
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            out.append(warning("W060", rel, "plan is not valid UTF-8; spec: check skipped"))
+BANNER_OPEN = "<!-- grim:status -->"
+BANNER_CLOSE = "<!-- /grim:status -->"
+IMPLEMENTED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\(PR #(\d+)\))?$")
+
+# Errors that make a derived banner untrustworthy. Spec-local ones mean this
+# file's own inputs are unreadable; the store-level ones (duplicate ids, bad
+# edges, two live successors) mean the graph the banner summarizes is already
+# known-wrong, and writing a summary of it would bake that into a frozen
+# document. Same reasoning run_check gives for refusing to byte-compare a
+# broken store. E090 is deliberately absent: it is the drift this repairs.
+BANNER_BLOCKING_CODES = frozenset(
+    {"E020", "E030", "E031", "E091", "E092", "E093", "E094"}
+)
+
+
+@dataclasses.dataclass
+class WorkingDoc:
+    path: Path
+    rel: str
+    kind: str  # "spec" or "plan"
+    text: str
+    fm: dict | None  # None when frontmatter is absent or unparseable
+
+
+def supersede_index(store: Store) -> dict[str, list[str]]:
+    """target id -> ids of components superseding it, whatever their status.
+
+    Distinct from check_edges' live-successor map, which keys only when the
+    successor is itself current and so cannot see past an intermediate link.
+    """
+    out: dict[str, list[str]] = {}
+    for c in store.components:
+        if not isinstance(c.cid, str):
             continue
-        m = FM_RE.match(text)
-        has_spec = False
-        if m:
-            try:
-                fm = yaml.safe_load(m.group(1))
-            except yaml.YAMLError:
-                fm = None
-            has_spec = (
-                isinstance(fm, dict)
-                and isinstance(fm.get("spec"), str)
-                and bool(fm["spec"].strip())
+        for target in c.supersedes:
+            if isinstance(target, str):
+                out.setdefault(target, []).append(c.cid)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def resolve_live_successors(
+    cid: str, index: dict[str, list[str]], status_by_id: dict[str, str]
+) -> list[str]:
+    """Every current component reachable by following supersede edges forward.
+
+    Returns ALL of them, sorted, rather than the nearest one. A forked chain
+    can reach two live endpoints without tripping E031, which only inspects a
+    target's immediate successors - so returning the first match would state
+    one successor as authoritative while silently dropping the other.
+
+    The visited set is mandatory, not defensive: check_edges rejects only
+    self-supersede and missing targets, so two mutually-superseding components
+    lint clean and would otherwise loop here forever.
+    """
+    seen = {cid}
+    found: set[str] = set()
+    frontier = list(index.get(cid, ()))
+    while frontier:
+        nxt: list[str] = []
+        for succ in sorted(frontier):
+            if succ in seen:
+                continue
+            seen.add(succ)
+            if status_by_id.get(succ) == "current":
+                found.add(succ)  # an endpoint; nothing supersedes a live node
+                continue
+            nxt.extend(index.get(succ, ()))
+        frontier = nxt
+    return sorted(found)
+
+
+def parse_implemented(value) -> tuple[str, str | None]:
+    """('2026-07-24', '14') from a stamp. Raises ValueError on any other shape.
+
+    The canonical on-disk form is quoted. Unquoted, YAML reads ' #' as a comment
+    and 'implemented: 2026-07-24 (PR #14)' silently becomes '2026-07-24 (PR'.
+    A bare date is accepted because YAML hands it back as a date object.
+    """
+    if isinstance(value, datetime.datetime):
+        raise ValueError("timestamp, not a date")
+    if isinstance(value, datetime.date):
+        return value.isoformat(), None
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError(f"{type(value).__name__}, not a string")
+    m = IMPLEMENTED_RE.match(value.strip())
+    if not m:
+        raise ValueError(f"{value!r} is not 'YYYY-MM-DD' or 'YYYY-MM-DD (PR #N)'")
+    date = m.group(1)
+    # DATE_RE is load-bearing: fromisoformat alone accepts forms it rejects.
+    if not (DATE_RE.fullmatch(date) and _valid_date(date)):
+        raise ValueError(f"{date!r} is not a real calendar date")
+    return date, m.group(2)
+
+
+def _banner_span(text: str) -> tuple[int, int] | None:
+    """Character span of the block interior, exclusive of both markers."""
+    open_at = text.find(BANNER_OPEN)
+    if open_at == -1:
+        return None
+    line_end = text.find("\n", open_at)
+    if line_end == -1:
+        return None
+    close_at = text.find(BANNER_CLOSE, line_end)
+    if close_at == -1:
+        return None
+    return line_end + 1, close_at
+
+
+def derive_banner(
+    components: list[str],
+    implemented: tuple[str, str | None] | None,
+    status_by_id: dict[str, str],
+    index: dict[str, list[str]],
+) -> str:
+    """The exact block interior. Never empty - see adr-never-empty-banner.
+
+    Composed rather than enumerated (adr-banner-qualifier-clauses): one
+    provenance line, then qualifier clauses in fixed order, so an unmatched
+    combination degrades to the provenance line rather than to silence.
+    """
+    if implemented is None:
+        lines = ["> **Not yet implemented.**"]
+    else:
+        date, pr = implemented
+        suffix = f" (PR #{pr})" if pr else ""
+        lines = [f"> **Implemented {date}{suffix}.**"]
+
+    known = [c for c in components if c in status_by_id]
+    unknown = sorted(c for c in components if c not in status_by_id)
+    drafts = sorted(c for c in known if status_by_id[c] == "draft")
+    gone = sorted(c for c in known if status_by_id[c] == "superseded")
+
+    qualified = False
+    if not components:
+        lines.append("> References no components.")
+        qualified = True
+    if unknown:
+        lines.append(f"> Unknown references: {', '.join(unknown)}.")
+        qualified = True
+    if drafts:
+        lines.append(f"> Not fully realized: {', '.join(drafts)} still draft.")
+        qualified = True
+    if gone:
+        if known and len(gone) == len(known):
+            lines.append("> Superseded.")
+        else:
+            pairs = ", ".join(
+                f"{c} -> {' or '.join(resolve_live_successors(c, index, status_by_id)) or 'abandoned'}"
+                for c in gone
             )
-        if not has_spec:
-            out.append(warning("W060", rel, "plan is missing spec: frontmatter"))
-    return out
+            lines.append(f"> Superseded in part: {pairs}")
+        qualified = True
+    # "References current." is the nothing-to-report line, and the design ties
+    # it to the stamped case. On an unstamped spec the provenance line already
+    # carries the news and already satisfies the never-empty rule, so adding it
+    # there is noise. Notable qualifiers above still fire either way.
+    if components and not qualified and implemented is not None:
+        lines.append("> References current.")
+    return "\n".join(lines) + "\n"
+
+
+def _load_working_docs(cfg: Config) -> tuple[list[WorkingDoc], list[Finding]]:
+    docs: list[WorkingDoc] = []
+    out: list[Finding] = []
+    seen: set[Path] = set()
+    for kind, base in (("spec", cfg.specs), ("plan", cfg.plans)):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.md")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue  # specs and plans configured to the same tree
+            seen.add(resolved)
+            rel = path.relative_to(cfg.root).as_posix()
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                out.append(warning("W060", rel, f"{kind} is not valid UTF-8; skipped"))
+                continue
+            m = FM_RE.match(text)
+            fm = None
+            if m:
+                try:
+                    parsed = yaml.safe_load(m.group(1))
+                except yaml.YAMLError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    fm = parsed
+            docs.append(WorkingDoc(path=path, rel=rel, kind=kind, text=text, fm=fm))
+    return docs, out
+
+
+def _resolve_spec_path(cfg: Config, raw: str) -> Path | None:
+    """Project-root-relative, refusing anything that escapes the root."""
+    candidate = (cfg.root / raw).resolve()
+    if not candidate.is_relative_to(cfg.root.resolve()):
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def analyze_working_layer(
+    cfg: Config, store: Store
+) -> tuple[list[Finding], dict[str, tuple[Path, str]]]:
+    """Findings plus, per file, the banner interior it should carry."""
+    out: list[Finding] = []
+    docs, load_findings = _load_working_docs(cfg)
+    out.extend(load_findings)
+
+    status_by_id = {
+        c.cid: c.status
+        for c in store.components
+        if isinstance(c.cid, str) and isinstance(c.status, str)
+    }
+    index = supersede_index(store)
+
+    derived_by_path: dict[Path, str] = {}
+    desired: dict[str, tuple[Path, str]] = {}
+
+    for doc in (d for d in docs if d.kind == "spec"):
+        fm = doc.fm
+        if fm is None:
+            out.append(error("E093", doc.rel, "spec frontmatter is missing or unparseable"))
+            continue
+        raw_components = fm.get("components", [])
+        if raw_components is None:
+            raw_components = []
+        if not isinstance(raw_components, list) or not all(
+            isinstance(c, str) for c in raw_components
+        ):
+            # An error, not a warning: derivation is skipped below, so no E090
+            # can fire for this file, and a warning would let grim check pass
+            # over a stale or empty banner. Same reasoning as E091.
+            out.append(error("E094", doc.rel, "components: is not a list of strings"))
+            continue
+        implemented = None
+        if "implemented" in fm:
+            try:
+                implemented = parse_implemented(fm["implemented"])
+            except ValueError as exc:
+                out.append(error("E091", doc.rel, f"malformed implemented: stamp: {exc}"))
+                continue
+        for cid in sorted(set(raw_components) - set(status_by_id)):
+            out.append(warning("W092", doc.rel, f"components: names {cid!r}, not in the store"))
+        derived_by_path[doc.path.resolve()] = derive_banner(
+            raw_components, implemented, status_by_id, index
+        )
+
+    for doc in docs:
+        if doc.kind == "plan":
+            fm = doc.fm or {}
+            if "implemented" in fm:
+                out.append(
+                    error("E092", doc.rel, "plan carries implemented:; the stamp is spec-level")
+                )
+                continue
+            raw = fm.get("spec")
+            if not (isinstance(raw, str) and raw.strip()):
+                out.append(warning("W060", doc.rel, "plan is missing spec: frontmatter"))
+                interior = "> **Status unavailable: no spec declared.**\n"
+            else:
+                target = _resolve_spec_path(cfg, raw.strip())
+                if target is None:
+                    out.append(warning("W093", doc.rel, f"spec: {raw.strip()!r} does not resolve"))
+                    interior = "> **Status unavailable: spec not found.**\n"
+                elif target not in derived_by_path:
+                    out.append(
+                        warning("W093", doc.rel, f"spec: {raw.strip()!r} is not a governed spec")
+                    )
+                    interior = "> **Status unavailable: spec not governed.**\n"
+                else:
+                    interior = derived_by_path[target]
+        else:
+            resolved = doc.path.resolve()
+            if resolved not in derived_by_path:
+                continue  # a finding above already explains why
+            interior = derived_by_path[resolved]
+
+        span = _banner_span(doc.text)
+        if span is None:
+            code = "W090" if doc.kind == "spec" else "W091"
+            out.append(
+                warning(
+                    code, doc.rel,
+                    f"{doc.kind} has no {BANNER_OPEN} block; add one from the template",
+                )
+            )
+            continue
+        if doc.text[span[0] : span[1]] != interior:
+            out.append(error("E090", doc.rel, f"banner block is out of date; {FIX_HINT}"))
+            desired[doc.rel] = (doc.path, interior)
+    return out, desired
+
+
+def apply_banner_fixes(
+    desired: dict[str, tuple[Path, str]], findings: list[Finding]
+) -> list[str]:
+    """Rewrite stale block interiors. Returns the rels actually repaired.
+
+    Skips a file only on a BLOCKING error, never on E090 itself: apply_fixes'
+    rule of skipping every file carrying any error would make --fix a no-op on
+    exactly the files this exists to repair.
+    """
+    blocked = {f.path for f in findings if f.code in BANNER_BLOCKING_CODES}
+    store_wide = any(f.code in BANNER_BLOCKING_CODES and f.path == "." for f in findings)
+    if store_wide or any(f.code in {"E020", "E030", "E031"} for f in findings):
+        return []
+    fixed: list[str] = []
+    for rel, (path, interior) in sorted(desired.items()):
+        if rel in blocked:
+            continue
+        if path.is_symlink():
+            raise ConfigError(f"{rel} is a symlink; refusing to write through it")
+        # Byte-level, not read_text/write_text: text mode normalizes CRLF to LF
+        # on read and would rewrite the whole file with translated endings,
+        # changing frozen bytes outside the block. Decoding read_bytes()
+        # performs no newline translation, so the splice touches only the span.
+        raw = path.read_bytes().decode("utf-8")
+        span = _banner_span(raw)
+        if span is None:
+            continue
+        path.write_bytes((raw[: span[0]] + interior + raw[span[1] :]).encode("utf-8"))
+        fixed.append(rel)
+    return fixed
 
 
 def _yaml_scalar(value, *, key: str | None = None, in_flow: bool = False) -> str:
@@ -776,8 +1081,21 @@ def run_lint(root: Path, *, fix: bool = False, strict: bool = False) -> LintResu
     findings += check_transitions(store, cfg, base, strict)
     findings += check_touched_paths(store, cfg, base, strict)
     findings += check_avoid_terms(store)
-    findings += check_plans(cfg)
-    fixed = apply_fixes(store, findings) if fix else []
+    wl_findings, desired = analyze_working_layer(cfg, store)
+    findings += wl_findings
+    fixed: list[str] = []
+    if fix:
+        fixed = apply_fixes(store, findings)
+        repaired = apply_banner_fixes(desired, findings)
+        fixed += repaired
+        # Findings are computed once above and exit_code derives from that
+        # list, so a repaired E090 would leave the fixing run exiting non-zero
+        # carrying the very error it just fixed - breaking `lint --fix &&
+        # render`, which the instruction files, the CI recipe and the adoption
+        # skill all mandate, and which is also the documented remedy for a
+        # banner merge conflict. Drop what we repaired.
+        done = set(repaired)
+        findings = [f for f in findings if not (f.code == "E090" and f.path in done)]
     return LintResult(findings=findings, fixed=fixed)
 
 

@@ -52,3 +52,21 @@ def test_scalar_types_value_raises(tmp_path):
     (tmp_path / ".grimore.toml").write_text('[grimore]\ntypes = "adr"\n', encoding="utf-8")
     with pytest.raises(grim.ConfigError):
         grim.load_config(tmp_path)
+
+
+def test_overlapping_specs_and_plans_is_rejected(tmp_path):
+    """Both dirs are walked as one pass and each file takes a single role, so
+    an overlap would silently classify every plan as a spec."""
+    (tmp_path / ".grimore.toml").write_text(
+        '[grimore]\nspecs = "docs/wl"\nplans = "docs/wl"\n', encoding="utf-8"
+    )
+    with pytest.raises(grim.ConfigError, match="must not overlap"):
+        grim.load_config(tmp_path)
+
+
+def test_nested_specs_inside_plans_is_rejected(tmp_path):
+    (tmp_path / ".grimore.toml").write_text(
+        '[grimore]\nspecs = "docs/wl/specs"\nplans = "docs/wl"\n', encoding="utf-8"
+    )
+    with pytest.raises(grim.ConfigError, match="must not overlap"):
+        grim.load_config(tmp_path)

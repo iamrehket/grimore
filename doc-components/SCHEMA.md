@@ -86,16 +86,37 @@ Specs (session artifacts, frozen after implementation):
 - Body includes a `## Decisions` section that references those IDs rather
   than restating them.
 - `implemented:` stamp is added once by finish-docs; already-stamped
-  specs are never re-stamped.
+  specs are never re-stamped. **It must be quoted on disk** —
+  `implemented: "2026-07-24 (PR #14)"`. Unquoted, YAML reads ` #` as the
+  start of a comment and the value silently truncates to `2026-07-24 (PR`.
+  A bare `implemented: 2026-07-24` is also accepted and coerced; every
+  other shape is rejected rather than parsed into a fragment.
 - The banner block delimited by `<!-- grim:status -->` and
   `<!-- /grim:status -->` is script-owned: grim lint --fix rewrites it;
   humans and agents never edit inside it. Everything outside the block is
   frozen after implementation.
+- **The block is never empty.** An unstamped spec renders "Not yet
+  implemented."; every other state renders at least a provenance line. A
+  populated block is evidence the deriver ran, which an empty one cannot
+  provide — it is indistinguishable from a script that never executed.
+- Banner text is **composed**, not enumerated: a provenance line, then
+  qualifier clauses in fixed order for an empty component list, draft
+  references, partial supersession, and full supersession.
+- Banner wording is **advisory**. Banners track explicit supersede edges
+  only; a decision reversed by a fresh component carrying no edge fires
+  nothing, and grim does not infer such reversals.
+- A stale banner is an error, not a warning: `grim check` byte-compares
+  only the rendered views, so working-layer drift is caught by lint or
+  not at all.
 
 Plans:
 
 - Frontmatter: `spec:` — repo-relative path to the plan's spec. Lint
   warns when missing. Plans inherit their spec's banner.
+- `spec:` resolves against the project root. A path escaping the root is
+  rejected unread. A missing or ungoverned target yields a status line
+  saying so rather than a blank block.
+- A plan never carries `implemented:` — the stamp is a spec-level fact.
 
 ## Render mapping (informative)
 
