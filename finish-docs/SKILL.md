@@ -43,23 +43,36 @@ the stamp asserts the spec was implemented.
 
 ### 2. Stamp the specs this branch finished
 
+Resolve `<skill-dir>` from this skill's own location - the plugin installs it
+outside the target repository, so a path relative to the working directory will
+not find it. Then run:
+
 ```bash
-uv run finish-docs/scripts/stamp_spec.py --branch-diff --date <YYYY-MM-DD> --pr <N>
+uv run --no-project <skill-dir>/scripts/stamp_spec.py \
+  --root <target> --branch-diff --date <YYYY-MM-DD> --pr <N>
 ```
 
 `--branch-diff` discovers every file under the configured specs directory that
 the branch added or modified and that carries `components:` frontmatter. Zero,
 one, or many; each is handled independently.
 
-`--date` is the day the work landed and `--pr` its pull-request number. Pass
-`--dry-run` first if you want to see what would happen.
+`--date` is the day the work landed and `--pr` its pull-request number, digits
+only. Pass `--dry-run` first if you want to see what would happen.
+
+Discovery reads the branch diff, which reports **tracked paths only**. A spec
+written but never `git add`ed is invisible to it. Stage new specs before
+running, or name them with `--spec`.
 
 To stamp a spec the branch diff will never surface - a historical spec that
 shipped before this tooling existed - name it explicitly:
 
 ```bash
-uv run finish-docs/scripts/stamp_spec.py --spec docs/specs/<file>.md --date <YYYY-MM-DD> --pr <N>
+uv run --no-project <skill-dir>/scripts/stamp_spec.py \
+  --root <target> --spec docs/specs/<file>.md --date <YYYY-MM-DD> --pr <N>
 ```
+
+`--spec` is resolved against `--root` and must name a file under the configured
+specs directory; anything else is rejected rather than written to.
 
 The script reports one of three outcomes per spec:
 

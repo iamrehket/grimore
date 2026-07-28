@@ -9,7 +9,7 @@
     {
       "name": "grimore",
       "source": "./",
-      "description": "align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), and adopt-docs (onboard a repo onto doc components)."
+      "description": "align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), adopt-docs (onboard a repo onto doc components), and finish-docs (branch-finish sync; spec discovery and the implemented stamp)."
     }
   ]
 }
