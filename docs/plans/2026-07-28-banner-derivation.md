@@ -3,7 +3,8 @@ spec: docs/specs/2026-07-28-banner-derivation.md
 ---
 
 <!-- grim:status -->
-> **Not yet implemented.**
+> **Implemented 2026-07-28 (PR #15).**
+> References current.
 <!-- /grim:status -->
 
 # Banner Derivation (IAM-41) Implementation Plan
