@@ -31,15 +31,24 @@ anyway.
 
 ## When to run
 
-After the suite is green and before the pull request is opened, so the
-documentation delta rides the same pull request as the code it describes.
+After the suite is green, and **after the pull request exists** - not before.
+
+The stamp records the pull request number, and it is written once and never
+rewritten. So the number has to be known at stamping time. If the pull request
+is not open yet, open it as a **draft** first; the documentation delta is then
+pushed to that same pull request, riding alongside the code it describes.
+
+Stamping before the pull request exists leaves a stamp with no number, and
+nothing in this skill will correct it afterwards.
 
 ## Procedure
 
-### 1. Confirm the branch is finished
+### 1. Confirm the branch is finished and the pull request exists
 
 Tests pass. The work is complete. Do not run this on a branch still in flight;
 the stamp asserts the spec was implemented.
+
+Note the pull request number. Open a draft pull request now if there is none.
 
 ### 2. Stamp the specs this branch finished
 

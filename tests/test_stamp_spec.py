@@ -15,9 +15,13 @@ STAMPER = (
 BLOCK = "<!-- grim:status -->\n<!-- /grim:status -->\n"
 
 
+GRIM = Path(__file__).resolve().parents[1] / "tools" / "grim.py"
+
+
 def run(root, *args):
+    # Fixtures do not vendor grim, so point the preflight at this repo's copy.
     return subprocess.run(
-        [sys.executable, str(STAMPER), "--root", str(root), *args],
+        [sys.executable, str(STAMPER), "--root", str(root), "--grim", str(GRIM), *args],
         capture_output=True,
         text=True,
     )
@@ -148,9 +152,12 @@ def test_refuses_unknown_component_ids(tmp_path):
 
 
 def test_refuses_malformed_components(tmp_path):
+    """Now caught by the grim preflight (E094) rather than by a duplicate check
+    here, so it exits 2 as a broken store rather than 1 as a judgement call."""
     spec = write_spec(tmp_path, raw_fm="components: {a: b}")
     r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
-    assert r.returncode == 1
+    assert r.returncode == 2
+    assert "E094" in r.stderr
     assert "implemented" not in spec.read_text(encoding="utf-8")
 
 
@@ -212,7 +219,7 @@ def test_branch_diff_discovers_a_changed_spec(tmp_path):
     assert 'implemented: "2026-07-27 (PR #9)"' in spec.read_text(encoding="utf-8")
 
 
-def test_branch_diff_ignores_specs_without_components_frontmatter(tmp_path):
+def test_branch_diff_candidacy_is_decided_by_location_not_frontmatter(tmp_path):
     git(tmp_path, "init", "-b", "main")
     git(tmp_path, "config", "user.email", "t@example.com")
     git(tmp_path, "config", "user.name", "T")
@@ -220,12 +227,15 @@ def test_branch_diff_ignores_specs_without_components_frontmatter(tmp_path):
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-m", "base")
     git(tmp_path, "checkout", "-b", "feature")
-    write_spec(tmp_path, raw_fm="title: not a governed spec")
+    write_spec(tmp_path, raw_fm="title: no components key")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-m", "add doc")
     r = run(tmp_path, "--branch-diff", "--date", "2026-07-27")
-    assert r.returncode == 0
-    assert "nothing to stamp" in r.stdout
+    # grim governs anything under the specs dir, so this script must too.
+    # Pre-filtering here used to drop exactly the files classify should judge,
+    # reporting "nothing to stamp" while grim reported drift on the same file.
+    assert "nothing to stamp" not in r.stdout
+    assert r.returncode == 0, r.stderr
 
 
 # --------------------------------------------------------------------------
@@ -339,7 +349,7 @@ def test_every_refusal_reason_is_one_grim_also_reports(tmp_path):
         spec = write_spec(tmp_path, raw_fm=raw_fm)
         r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
         codes = grim_findings(tmp_path)
-        assert r.returncode == 1, f"stamper accepted {raw_fm!r}"
+        assert r.returncode != 0, f"stamper accepted {raw_fm!r}"
         assert any(c in codes for c in ("E094", "W092")), (
             f"stamper refused {raw_fm!r} but grim reported {codes}"
         )
@@ -354,6 +364,6 @@ def test_stamper_refuses_a_stamp_grim_cannot_parse(tmp_path):
         tmp_path, raw_fm="components: [adr-x]\nimplemented: 2026-07-24 (PR #14)"
     )
     r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
-    assert r.returncode == 1
-    assert "malformed stamp" in r.stderr
+    assert r.returncode == 2
+    assert "E091" in r.stderr  # surfaced from grim rather than re-derived here
     assert "E091" in grim_findings(tmp_path)

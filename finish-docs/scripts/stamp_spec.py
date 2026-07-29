@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import re
 import subprocess
 import sys
@@ -47,6 +48,70 @@ SKIP, REFUSE, STAMP = "skip", "refuse", "stamp"
 
 class DiscoveryError(Exception):
     """git could not answer what the branch changed - never 'nothing changed'."""
+
+
+class PreflightError(Exception):
+    """grim reports the store or config is broken; nothing may be mutated."""
+
+
+def grim_preflight(root: Path, grim_path: Path) -> None:
+    """Refuse to mutate anything unless grim reports a clean store.
+
+    grim is the single authority on whether a store, its config, and its
+    working-layer files are valid. Re-implementing those checks here produced
+    eleven divergences across two review rounds - every one a case where this
+    script accepted what grim rejects, wrote a stamp, and left the operator
+    with a green run and a red CI. So this asks grim rather than guessing, and
+    only judges afterwards what grim has no opinion about: whether a referenced
+    component is still draft, and whether a banner block exists to carry the
+    result.
+    """
+    if not grim_path.is_file():
+        raise PreflightError(
+            f"grim not found at {grim_path}; pass --grim with its location"
+        )
+    result = subprocess.run(
+        [sys.executable, str(grim_path), "lint", "--json", "--root", str(root)],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        # A config error exits before any JSON is produced.
+        detail = (result.stderr or result.stdout).strip() or f"exit {result.returncode}"
+        raise PreflightError(f"grim lint could not run: {detail}") from None
+    # E090 is banner drift, and it is the one error that must not block: an
+    # underived banner is the normal state before `lint --fix`, stamping is
+    # about to change it again, and the documented next step resolves it. Every
+    # other error means the store is broken in a way stamping cannot help.
+    errors = [e for e in report.get("errors", []) if e.get("code") != "E090"]
+    if errors:
+        lines = "\n".join(
+            f"  {e.get('code')} {e.get('path')}: {e.get('message')}" for e in errors[:10]
+        )
+        more = "" if len(errors) <= 10 else f"\n  ... and {len(errors) - 10} more"
+        raise PreflightError(
+            f"grim lint reports {len(errors)} error(s); refusing to stamp:\n{lines}{more}"
+        )
+
+
+BANNER_OPEN = "<!-- grim:status -->"
+BANNER_CLOSE = "<!-- /grim:status -->"
+
+
+def _banner_span(text: str) -> tuple[int, int] | None:
+    """Span of the block interior. Presence only - grim owns the contents."""
+    open_at = text.find(BANNER_OPEN)
+    if open_at == -1:
+        return None
+    line_end = text.find("\n", open_at)
+    if line_end == -1:
+        return None
+    close_at = text.find(BANNER_CLOSE, line_end)
+    if close_at == -1:
+        return None
+    return line_end + 1, close_at
 
 
 def valid_date(value: str) -> bool:
@@ -144,15 +209,18 @@ def discover_from_diff(root: Path, specs_dir: Path, default_branch: str) -> list
         path = root / name
         if not path.is_file() or specs_dir.resolve() not in path.resolve().parents:
             continue
-        _raw, m, fm = read_frontmatter(path)
-        if m is not None and fm is not None and "components" in fm:
-            out.append(path)
+        # Deliberately no frontmatter filter. Filtering here would silently drop
+        # exactly the files classify() should refuse - a malformed spec, or one
+        # missing components: - and report "nothing to stamp" while grim governs
+        # the same file and reports drift on it. Location decides candidacy;
+        # classify decides the outcome.
+        out.append(path)
     return sorted(set(out))
 
 
 def classify(path: Path, statuses: dict[str, str]) -> tuple[str, str]:
     """What to do with this spec, and why - one of skip, refuse, stamp."""
-    _raw, m, fm = read_frontmatter(path)
+    raw, m, fm = read_frontmatter(path)
     if m is None or fm is None:
         return REFUSE, "frontmatter is missing or unparseable"
     if "implemented" in fm:
@@ -185,6 +253,15 @@ def classify(path: Path, statuses: dict[str, str]) -> tuple[str, str]:
             f"still draft, so nothing justifies an implemented claim: {', '.join(drafts)}"
             " (reconciliation is phase B)"
         )
+    # grim only warns (W090) about a spec with no banner block, and warnings do
+    # not fail grim check - so a stamp written here would land with nowhere to
+    # surface and nothing would ever say so. The stamp is immutable once
+    # written, which makes this the last chance to catch it.
+    if _banner_span(raw) is None:
+        return REFUSE, (
+            "no <!-- grim:status --> block, so a stamp would have nowhere to "
+            "surface; add one from doc-components/templates/spec.md first"
+        )
     return STAMP, "all referenced components are current or superseded"
 
 
@@ -215,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", required=True, help="YYYY-MM-DD the work landed")
     parser.add_argument("--pr", help="pull request number, recorded alongside the date")
     parser.add_argument("--dry-run", action="store_true", help="report without writing")
+    parser.add_argument("--grim", type=Path,
+                        help="path to grim (default: <root>/tools/grim.py)")
     args = parser.parse_args(argv)
 
     if not valid_date(args.date):
@@ -238,6 +317,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     root = args.root.resolve()
+    # Before anything is read for a decision or written to disk. grim decides
+    # whether the store, the config and the working layer are valid; this
+    # script only judges what grim has no opinion about.
+    try:
+        grim_preflight(root, (args.grim or root / "tools" / "grim.py").resolve())
+    except PreflightError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     cfg = load_config(root)
     specs_dir = (root / cfg["specs"]).resolve()
     statuses = component_statuses(root / cfg["components"])
