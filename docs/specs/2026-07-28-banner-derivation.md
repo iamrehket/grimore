@@ -3,10 +3,12 @@ components:
   - adr-never-empty-banner
   - adr-banner-qualifier-clauses
   - adr-quoted-stamp-format
+implemented: "2026-07-28 (PR #15)"
 ---
 
 <!-- grim:status -->
-> **Not yet implemented.**
+> **Implemented 2026-07-28 (PR #15).**
+> References current.
 <!-- /grim:status -->
 
 # Banner Derivation - Design

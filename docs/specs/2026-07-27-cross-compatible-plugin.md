@@ -3,10 +3,12 @@ components:
   - adr-dual-plugin-manifests
   - adr-stdlib-provenance-resolver
   - nongoal-host-abstraction-framework
+implemented: "2026-07-27 (PR #14)"
 ---
 
 <!-- grim:status -->
-> **Not yet implemented.**
+> **Implemented 2026-07-27 (PR #14).**
+> References current.
 <!-- /grim:status -->
 
 # Cross-Compatible Plugin - Design
