@@ -70,3 +70,59 @@ def test_nested_specs_inside_plans_is_rejected(tmp_path):
     )
     with pytest.raises(grim.ConfigError, match="must not overlap"):
         grim.load_config(tmp_path)
+
+
+def standing_waiver_config(tmp_path, entry):
+    (tmp_path / ".grimore.toml").write_text(
+        f"[grimore]\n\n[[grimore.standing_waiver]]\n{entry}\n", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_standing_waiver_parses(tmp_path):
+    standing_waiver_config(
+        tmp_path,
+        'component = "adr-x"\npaths = ["a.json", "b/"]\nreason = "churns for other reasons"',
+    )
+    [sw] = grim.load_config(tmp_path).standing_waivers
+    assert sw.component == "adr-x"
+    assert sw.paths == ("a.json", "b/")
+    assert sw.reason == "churns for other reasons"
+
+
+def test_standing_waiver_requires_a_reason(tmp_path):
+    # A bypass nobody has to justify is not reviewable. W071 already made the
+    # component-plus-reason pairing the thing that makes a waiver auditable.
+    standing_waiver_config(tmp_path, 'component = "adr-x"\npaths = ["a.json"]')
+    with pytest.raises(grim.ConfigError, match="reason is required"):
+        grim.load_config(tmp_path)
+
+
+def test_standing_waiver_rejects_an_empty_reason(tmp_path):
+    standing_waiver_config(
+        tmp_path, 'component = "adr-x"\npaths = ["a.json"]\nreason = "   "'
+    )
+    with pytest.raises(grim.ConfigError, match="reason is required"):
+        grim.load_config(tmp_path)
+
+
+def test_standing_waiver_requires_paths(tmp_path):
+    # Without paths it would be a component-wide bypass, which is what a
+    # Grim-Waive trailer already is - and that one expires with the branch.
+    standing_waiver_config(tmp_path, 'component = "adr-x"\npaths = []\nreason = "r"')
+    with pytest.raises(grim.ConfigError, match="non-empty list"):
+        grim.load_config(tmp_path)
+
+
+def test_standing_waiver_rejects_unknown_keys(tmp_path):
+    standing_waiver_config(
+        tmp_path,
+        'component = "adr-x"\npaths = ["a.json"]\nreason = "r"\nexpires = "never"',
+    )
+    with pytest.raises(grim.ConfigError, match="unknown key"):
+        grim.load_config(tmp_path)
+
+
+def test_no_standing_waivers_by_default(tmp_path):
+    (tmp_path / ".grimore.toml").write_text("[grimore]\n", encoding="utf-8")
+    assert grim.load_config(tmp_path).standing_waivers == ()

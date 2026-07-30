@@ -193,3 +193,74 @@ def test_configured_path_outside_root_is_config_error(tmp_path):
     import pytest
     with pytest.raises(grim.ConfigError):
         grim.load_config(repo)
+
+
+def test_current_body_edit_is_e043(tmp_path):
+    # SCHEMA: drafts are the only place in-place edits are allowed. E040
+    # compares status alone and the touched-path guard skips a component whose
+    # own file changed, so this was invisible to every check.
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x", status="current", body="Original prose.")
+    commit_all(tmp_path, "add current")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(tmp_path, "adr", "x", status="current", body="Rewritten prose.")
+    findings = transitions(tmp_path)
+    assert codes(findings) == ["E043"]
+    assert "the body" in findings[0].message
+
+
+def test_current_frontmatter_edit_is_e043(tmp_path):
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x", status="current")
+    commit_all(tmp_path, "add current")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(tmp_path, "adr", "x", status="current", extra={"paths": "[src/]"})
+    findings = transitions(tmp_path)
+    assert codes(findings) == ["E043"]
+    assert "paths" in findings[0].message
+
+
+def test_superseded_component_edit_is_e043(tmp_path):
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x", status="superseded", body="Original.")
+    commit_all(tmp_path, "add superseded")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(tmp_path, "adr", "x", status="superseded", body="Rewritten.")
+    assert codes(transitions(tmp_path)) == ["E043"]
+
+
+def test_status_only_flip_is_not_e043(tmp_path):
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x", status="current", body="Prose.")
+    commit_all(tmp_path, "add current")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(tmp_path, "adr", "x", status="superseded", body="Prose.")
+    assert transitions(tmp_path) == []
+
+
+def test_amending_a_draft_then_promoting_is_not_e043(tmp_path):
+    # The gate is the status at the merge-base, not at HEAD: amend-then-promote
+    # is the whole point of reconciliation's second outcome.
+    make_repo(tmp_path)
+    write_component(tmp_path, "adr", "x", status="draft", body="As designed.")
+    commit_all(tmp_path, "add draft")
+    git(tmp_path, "checkout", "-b", "feature")
+    write_component(tmp_path, "adr", "x", status="current", body="As built.")
+    assert transitions(tmp_path) == []
+
+
+def test_lint_fix_normalization_is_not_e043(tmp_path):
+    # E043 compares the parsed frontmatter and the newline-stripped body, not
+    # raw bytes. lint --fix reorders fields to FIELD_ORDER, reformats values,
+    # and re-spaces the body; a byte comparison would call every normalized
+    # file an illegal edit.
+    make_repo(tmp_path)
+    write_component(
+        tmp_path, "adr", "x",
+        raw_fm="date: 2026-07-24\nstatus: current\ntype: adr\nid: adr-x",
+        body="Prose.",
+    )
+    commit_all(tmp_path, "add unnormalized current")
+    git(tmp_path, "checkout", "-b", "feature")
+    grim.main(["lint", "--fix", "--root", str(tmp_path)])
+    assert transitions(tmp_path) == []

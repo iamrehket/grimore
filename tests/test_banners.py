@@ -432,3 +432,64 @@ def test_check_fails_on_a_stale_banner(tmp_path):
         encoding="utf-8",
     )
     assert grim.run_check(tmp_path).exit_code == 1
+
+
+def test_abandoned_references_needs_no_live_successor(tmp_path):
+    status = {"adr-gone": "superseded", "adr-live": "current"}
+    # Replaced: a live successor exists, so it was implemented and then moved on.
+    assert grim.abandoned_references(["adr-gone"], status, {"adr-gone": ["adr-live"]}) == []
+    # Abandoned: nothing live replaces it.
+    assert grim.abandoned_references(["adr-gone"], status, {}) == ["adr-gone"]
+    # Current and draft references are not abandonment either way.
+    assert grim.abandoned_references(["adr-live"], status, {}) == []
+
+
+def test_stamped_spec_with_only_abandoned_components_is_e095(tmp_path):
+    # The laundering path: reconcile writes `superseded` for work never built,
+    # a superseded component does not block a stamp, and the banner renders a
+    # bare "Superseded." either way - so nothing downstream said no.
+    write_component(tmp_path, "adr", "never-built", status="superseded")
+    write_spec(
+        tmp_path, "s.md",
+        raw_fm='components: [adr-never-built]\nimplemented: "2026-07-24 (PR #1)"',
+    )
+    findings, _ = grim.analyze_working_layer(
+        grim.load_config(tmp_path), grim.load_store(grim.load_config(tmp_path))
+    )
+    assert "E095" in [f.code for f in findings]
+
+
+def test_stamped_spec_with_a_replaced_component_is_clean(tmp_path):
+    write_component(tmp_path, "adr", "old", status="superseded")
+    write_component(tmp_path, "adr", "new", status="current", extra={"supersedes": "[adr-old]"})
+    write_spec(
+        tmp_path, "s.md",
+        raw_fm='components: [adr-old]\nimplemented: "2026-07-24 (PR #1)"',
+    )
+    cfg = grim.load_config(tmp_path)
+    findings, _ = grim.analyze_working_layer(cfg, grim.load_store(cfg))
+    assert "E095" not in [f.code for f in findings]
+
+
+def test_unstamped_spec_with_abandoned_components_is_clean(tmp_path):
+    # Abandoning without claiming implementation is honest; only the stamp lies.
+    write_component(tmp_path, "adr", "never-built", status="superseded")
+    write_spec(tmp_path, "s.md", raw_fm="components: [adr-never-built]")
+    cfg = grim.load_config(tmp_path)
+    findings, _ = grim.analyze_working_layer(cfg, grim.load_store(cfg))
+    assert "E095" not in [f.code for f in findings]
+
+
+def test_partially_abandoned_stamped_spec_is_clean(tmp_path):
+    # One component shipped, one was dropped: the spec was implemented in part,
+    # and the banner already reports the discrepancy. Only "nothing was built"
+    # contradicts the stamp outright.
+    write_component(tmp_path, "adr", "shipped", status="current")
+    write_component(tmp_path, "adr", "dropped", status="superseded")
+    write_spec(
+        tmp_path, "s.md",
+        raw_fm='components: [adr-shipped, adr-dropped]\nimplemented: "2026-07-24 (PR #1)"',
+    )
+    cfg = grim.load_config(tmp_path)
+    findings, _ = grim.analyze_working_layer(cfg, grim.load_store(cfg))
+    assert "E095" not in [f.code for f in findings]

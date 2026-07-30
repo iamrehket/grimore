@@ -53,6 +53,22 @@ class ConfigError(Exception):
     """Unusable .grimore.toml or config values."""
 
 
+@dataclasses.dataclass(frozen=True)
+class StandingWaiver:
+    """A permanent, path-scoped bypass of the touched-path guard.
+
+    Scoped to one component AND a subset of its declared paths, so the
+    component still gates on everything else it declares. That is the whole
+    difference from a Grim-Waive trailer, which is component-wide but expires
+    with the branch: a standing waiver is permanently deaf where a trailer is
+    deaf once and makes you re-justify it. Keep the list short.
+    """
+
+    component: str
+    paths: tuple[str, ...]
+    reason: str
+
+
 @dataclasses.dataclass
 class Config:
     root: Path
@@ -62,6 +78,7 @@ class Config:
     plans: Path
     default_branch: str
     types: tuple[str, ...]
+    standing_waivers: tuple[StandingWaiver, ...] = ()
 
 
 def load_config(root: Path) -> Config:
@@ -110,7 +127,46 @@ def load_config(root: Path) -> Config:
         plans=paths["plans"],
         default_branch=raw.get("default_branch", DEFAULTS["default_branch"]),
         types=types,
+        standing_waivers=parse_standing_waivers(raw),
     )
+
+
+def parse_standing_waivers(raw: dict) -> tuple[StandingWaiver, ...]:
+    """[[grimore.standing_waiver]] entries, validated for shape.
+
+    Shape errors raise rather than being dropped: a malformed entry that
+    silently vanished would leave the operator staring at the E070 the waiver
+    was written to answer, with nothing pointing at the typo. Whether the named
+    component exists is a store question, so it is E073's job, not this one's.
+    """
+    entries = raw.get("standing_waiver", [])
+    if not isinstance(entries, list):
+        raise ConfigError(".grimore.toml: standing_waiver must be a list of tables")
+    out: list[StandingWaiver] = []
+    for i, entry in enumerate(entries):
+        where = f".grimore.toml: standing_waiver[{i}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{where} must be a table")
+        unknown = sorted(set(entry) - {"component", "paths", "reason"})
+        if unknown:
+            raise ConfigError(f"{where}: unknown key(s) {', '.join(unknown)}")
+        component, reason = entry.get("component"), entry.get("reason")
+        globs = entry.get("paths")
+        if not isinstance(component, str) or not component.strip():
+            raise ConfigError(f"{where}: component must be a non-empty string")
+        # Required, not optional. A waiver without a stated reason is an
+        # unreviewable bypass, and W071 already established that the
+        # component-plus-reason pairing is what makes one auditable.
+        if not isinstance(reason, str) or not reason.strip():
+            raise ConfigError(f"{where}: reason is required and must be non-empty")
+        if (
+            not isinstance(globs, list)
+            or not globs
+            or not all(isinstance(g, str) and g.strip() for g in globs)
+        ):
+            raise ConfigError(f"{where}: paths must be a non-empty list of glob strings")
+        out.append(StandingWaiver(component.strip(), tuple(globs), reason.strip()))
+    return tuple(out)
 
 
 @dataclasses.dataclass
@@ -171,12 +227,24 @@ def parse_component(path: Path, root: Path) -> tuple[Component | None, list[Find
         return None, [error("E002", rel, f"invalid YAML frontmatter: {exc}")]
     if not isinstance(fm, dict):
         return None, [error("E003", rel, "frontmatter is not a mapping")]
-    if isinstance(fm.get("date"), datetime.date):
-        fm["date"] = fm["date"].isoformat()
+    coerce_fm(fm)
     return (
         Component(path=path, rel=rel, dir_type=path.parent.name, fm=fm, body=m.group(2)),
         [],
     )
+
+
+def coerce_fm(fm: dict) -> dict:
+    """Normalize parsed frontmatter in place. Every reader must use this.
+
+    YAML resolves an unquoted `date: 2026-07-24` to a datetime.date, so a
+    caller that parses frontmatter itself and compares against a Component's fm
+    would see str != date and report a change nobody made. E043 learned that
+    the hard way, on all 48 components at once.
+    """
+    if isinstance(fm.get("date"), datetime.date):
+        fm["date"] = fm["date"].isoformat()
+    return fm
 
 
 @dataclasses.dataclass
@@ -306,6 +374,9 @@ def check_edges(store: Store) -> list[Finding]:
     out: list[Finding] = []
     ids = {c.cid for c in store.components if isinstance(c.cid, str)}
     rel_by_id = {c.cid: c.rel for c in store.components if isinstance(c.cid, str)}
+    status_by_id = {
+        c.cid: c.status for c in store.components if isinstance(c.cid, str)
+    }
     live_successors: dict[str, list[str]] = {}
     for c in store.components:
         for target in c.supersedes:
@@ -320,7 +391,30 @@ def check_edges(store: Store) -> list[Finding]:
                 )
                 continue
             if c.status == "current" and isinstance(c.cid, str):
-                live_successors.setdefault(target, []).append(c.cid)
+                # setdefault(...).append would count a component listing the
+                # same target twice as two live successors and report
+                # "'x' has 2 live successors (adr-n, adr-n)" - a duplicate
+                # list entry is idempotent, not a fork. Dedupe so E031 means
+                # what it says.
+                succs = live_successors.setdefault(target, [])
+                if c.cid not in succs:
+                    succs.append(c.cid)
+                # SCHEMA: the edge takes effect at promotion, when the target
+                # flips to superseded in the same pass. Nothing enforced that,
+                # so a promotion whose cascade never ran left both decisions
+                # live and rendered both into the consumer view as current,
+                # passing lint and check in silence.
+                if status_by_id.get(target) == "current":
+                    out.append(
+                        error(
+                            "E032",
+                            rel_by_id.get(target, "."),
+                            f"still current, but {c.cid!r} supersedes it; the cascade "
+                            f"did not run - set this component's status to superseded "
+                            f"in the same pass that promoted {c.cid!r}",
+                            target,
+                        )
+                    )
     for target, succs in sorted(live_successors.items()):
         if len(succs) >= 2:
             out.append(
@@ -445,6 +539,8 @@ def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool)
             continue  # new on this branch; any initial status is legal
         show = _git(cfg, "show", f"{base}:{git_rel}")
         old_status = None
+        old_fm = None
+        old_body = None
         if show.returncode == 0:
             m = FM_RE.match(show.stdout)
             if m:
@@ -453,12 +549,33 @@ def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool)
                 except yaml.YAMLError:
                     old_fm = None
                 if isinstance(old_fm, dict):
+                    coerce_fm(old_fm)
                     old_status = old_fm.get("status")
+                    old_body = m.group(2)
         if old_status is None:
             out.append(
                 warning("W043", c.rel, "could not read status at merge-base; transition skipped", c.cid)
             )
             continue
+        # SCHEMA: drafts are the only place in-place edits are allowed, and the
+        # rule had no enforcement. E040 below compares status alone, and the
+        # touched-path guard deliberately skips a component whose own file
+        # changed - so rewriting a current component's body was invisible to
+        # every check. Gated on the status at the merge-base, not at HEAD, so
+        # amending a draft and promoting it in the same branch stays legal.
+        if old_status != "draft" and old_body is not None and isinstance(old_fm, dict):
+            changed = sorted(_nonstatus_changes(old_fm, old_body, c))
+            if changed:
+                out.append(
+                    error(
+                        "E043",
+                        c.rel,
+                        f"was {old_status!r} at the merge-base, so only its status may "
+                        f"change; {', '.join(changed)} also changed. Revert the edit and "
+                        f"supersede this component with a new one instead",
+                        c.cid,
+                    )
+                )
         new_status = c.status
         if new_status == old_status or (old_status, new_status) in LEGAL_TRANSITIONS:
             continue
@@ -471,6 +588,24 @@ def check_transitions(store: Store, cfg: Config, base: str | None, strict: bool)
             )
         )
     return out
+
+
+def _nonstatus_changes(old_fm: dict, old_body: str, c: Component) -> set[str]:
+    """What changed besides `status`, as field names plus maybe "the body".
+
+    Compares the *parsed* frontmatter and the newline-stripped body rather than
+    raw bytes. `lint --fix` reorders frontmatter to FIELD_ORDER, reformats
+    values, and re-spaces the body, so a byte comparison would report every
+    normalized file as an illegal edit.
+    """
+    changed = {
+        key
+        for key in (set(old_fm) | set(c.fm)) - {"status"}
+        if old_fm.get(key) != c.fm.get(key)
+    }
+    if old_body.strip("\n") != c.body.strip("\n"):
+        changed.add("the body")
+    return changed
 
 
 def _glob_hit(path: str, globs: list) -> bool:
@@ -516,10 +651,49 @@ def check_touched_paths(store: Store, cfg: Config, base: str | None, strict: boo
     git_root = Path(top.stdout.strip()).resolve()
     touched = {name for name in diff.stdout.split("\0") if name}
     waivers = collect_waivers(cfg, base)
+    standing: dict[str, list[StandingWaiver]] = {}
+    known_ids = {c.cid for c in store.components if isinstance(c.cid, str)}
+    for sw in cfg.standing_waivers:
+        # Components are never deleted, so a name that resolves to nothing is
+        # always a typo - and a silent one, because the waiver simply fails to
+        # apply and the operator gets a bare E070 with no hint that a waiver
+        # was meant to cover it.
+        if sw.component not in known_ids:
+            out.append(error(
+                "E073", ".",
+                f"standing waiver names {sw.component!r}, which is not a component "
+                f"in the store", sw.component,
+            ))
+            continue
+        standing.setdefault(sw.component, []).append(sw)
     for c in gating:
         own = c.path.resolve().relative_to(git_root).as_posix()
         hits = sorted(p for p in touched if _glob_hit(p, c.fm["paths"]))
-        if not hits or own in touched:
+        # Path-scoped, so the subtraction happens per path rather than per
+        # component: everything this component declares and the waiver does not
+        # cover still gates. That scoping is the whole difference from a
+        # Grim-Waive trailer, which is why standing waivers stay out of the
+        # collect_waivers dict.
+        cid = c.cid if isinstance(c.cid, str) else ""
+        covered = standing.get(cid, [])
+        waived = sorted(p for p in hits if any(_glob_hit(p, list(sw.paths)) for sw in covered))
+        hits = [p for p in hits if p not in set(waived)]
+        if not hits and not waived:
+            continue
+        if own in touched:
+            continue
+        if waived:
+            # Emitted whenever anything was waived, not only when nothing is
+            # left: on a mixed hit the unwaived path raises E070 and the
+            # permanently-deaf subset would otherwise vanish from the output
+            # that reviewers read.
+            reasons = "; ".join(sw.reason for sw in covered)
+            out.append(warning(
+                "W073", c.rel,
+                f"standing waiver covers {', '.join(repr(p) for p in waived)}: {reasons}",
+                c.cid,
+            ))
+        if not hits:
             continue
         if c.cid in waivers:
             reasons = "; ".join(waivers[c.cid])
@@ -528,11 +702,16 @@ def check_touched_paths(store: Store, cfg: Config, base: str | None, strict: boo
                 f"touched-path hit on {hits[0]!r} waived: {reasons}", c.cid,
             ))
         else:
+            # Not "update it": SCHEMA forbids editing anything but a draft, so
+            # for the current components this guard gates on, amending the
+            # component is never a legal remedy.
             out.append(error(
                 "E070", c.rel,
                 f"branch touches {hits[0]!r}, declared in this component's paths:, "
-                f"without changing the component; update it or record a waiver with "
-                f"commit trailer 'Grim-Waive: {c.cid} <reason>'", c.cid,
+                f"without changing the component; supersede it with a new component, "
+                f"record a waiver with commit trailer 'Grim-Waive: {c.cid} <reason>', "
+                f"or add a [[grimore.standing_waiver]] if this path churns for reasons "
+                f"the decision does not govern", c.cid,
             ))
     return out
 
@@ -586,7 +765,7 @@ IMPLEMENTED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:\s+\(PR #(\d+)\))?$")
 # document. Same reasoning run_check gives for refusing to byte-compare a
 # broken store. E090 is deliberately absent: it is the drift this repairs.
 BANNER_BLOCKING_CODES = frozenset(
-    {"E020", "E030", "E031", "E091", "E092", "E093", "E094"}
+    {"E020", "E030", "E031", "E032", "E091", "E092", "E093", "E094"}
 )
 
 
@@ -644,6 +823,28 @@ def resolve_live_successors(
             nxt.extend(index.get(succ, ()))
         frontier = nxt
     return sorted(found)
+
+
+def abandoned_references(
+    components: list[str], status_by_id: dict[str, str], index: dict[str, list[str]]
+) -> list[str]:
+    """Referenced components that were superseded with nothing live replacing them.
+
+    The distinction the store cannot otherwise express. `superseded` is written
+    both by "this decision was replaced" and by "this was never built", and the
+    rendered banner collapses them: with every reference superseded,
+    derive_banner takes its all-gone branch and prints a bare "Superseded.",
+    so the 'abandoned' wording in the partial-supersession path is unreachable
+    in exactly the case where it would matter. Reachability is the signal that
+    survives - a replacement leaves a live successor behind, an abandonment
+    does not.
+    """
+    return sorted(
+        cid
+        for cid in set(components)
+        if status_by_id.get(cid) == "superseded"
+        and not resolve_live_successors(cid, index, status_by_id)
+    )
 
 
 def parse_implemented(value) -> tuple[str, str | None]:
@@ -818,6 +1019,21 @@ def analyze_working_layer(
                 continue
         for cid in sorted(set(raw_components) - set(status_by_id)):
             out.append(warning("W092", doc.rel, f"components: names {cid!r}, not in the store"))
+        known = [c for c in raw_components if c in status_by_id]
+        abandoned = abandoned_references(known, status_by_id, index)
+        # A stamp asserts the spec was implemented. Abandoning every component
+        # it created says the opposite, and the two states are indistinguishable
+        # downstream: a superseded component does not block a stamp (correctly,
+        # since a decision later replaced was still implemented) and the banner
+        # renders a plain "Superseded." either way. So the claim has to be
+        # refused where it is made.
+        if implemented is not None and known and len(abandoned) == len(known):
+            out.append(error(
+                "E095", doc.rel,
+                f"stamped implemented, but every component it created was abandoned "
+                f"with no live successor ({', '.join(abandoned)}); nothing was built, "
+                f"so remove the stamp or supersede those components with what shipped",
+            ))
         derived_by_path[doc.path.resolve()] = derive_banner(
             raw_components, implemented, status_by_id, index
         )
@@ -879,7 +1095,14 @@ def apply_banner_fixes(
     """
     blocked = {f.path for f in findings if f.code in BANNER_BLOCKING_CODES}
     store_wide = any(f.code in BANNER_BLOCKING_CODES and f.path == "." for f in findings)
-    if store_wide or any(f.code in {"E020", "E030", "E031"} for f in findings):
+    # These are graph-level, so membership in BANNER_BLOCKING_CODES alone does
+    # not stop them: that set is matched against the finding's path, which for
+    # a graph error is a *component*, while the files rewritten here are
+    # *specs*. E032 belongs here for the same reason as E031 - an un-cascaded
+    # edge makes the derived banner actively wrong (it renders
+    # "References current." about a component the store says was replaced),
+    # and writing that into a frozen document bakes the error in.
+    if store_wide or any(f.code in {"E020", "E030", "E031", "E032"} for f in findings):
         return []
     fixed: list[str] = []
     for rel, (path, interior) in sorted(desired.items()):

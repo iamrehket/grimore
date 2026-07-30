@@ -67,3 +67,58 @@ def test_successor_without_id_does_not_crash(tmp_path):
         raw_fm="type: adr\nstatus: current\nsupersedes: [adr-old]\ndate: 2026-07-24",
     )
     assert grim.check_edges(load(tmp_path)) == []
+
+
+def test_uncascaded_promotion_is_e032(tmp_path):
+    # SCHEMA: the edge takes effect at promotion, when the target flips to
+    # superseded in the same pass. Before E032 this lint-ed and check-ed clean
+    # while rendering both decisions into the consumer view as live.
+    write_component(tmp_path, "adr", "old", status="current")
+    write_component(tmp_path, "adr", "new", status="current", extra={"supersedes": "[adr-old]"})
+    findings = grim.check_edges(load(tmp_path))
+    assert codes(findings) == ["E032"]
+    assert findings[0].component == "adr-old"
+    # Reported against the file that must change, matching E031's convention.
+    assert findings[0].path.endswith("old.md")
+
+
+def test_draft_successor_does_not_trip_e032(tmp_path):
+    # The normal pre-promotion state: the edge is authored on the draft and
+    # takes effect later. Flagging it would fire on every unfinished branch.
+    write_component(tmp_path, "adr", "old", status="current")
+    write_component(tmp_path, "adr", "new", status="draft", extra={"supersedes": "[adr-old]"})
+    assert grim.check_edges(load(tmp_path)) == []
+
+
+def test_cascaded_promotion_is_clean(tmp_path):
+    write_component(tmp_path, "adr", "old", status="superseded")
+    write_component(tmp_path, "adr", "new", status="current", extra={"supersedes": "[adr-old]"})
+    assert grim.check_edges(load(tmp_path)) == []
+
+
+def test_e032_blocks_banner_derivation(tmp_path):
+    # The banner is not merely uninformative in this state, it is wrong: it
+    # renders "References current." about a component the store says was
+    # replaced. Writing that into a frozen spec bakes the error in.
+    from helpers import write_spec
+
+    write_component(tmp_path, "adr", "old", status="current")
+    write_component(tmp_path, "adr", "new", status="current", extra={"supersedes": "[adr-old]"})
+    write_spec(
+        tmp_path, "s.md",
+        raw_fm='components: [adr-old]\nimplemented: "2026-07-24 (PR #1)"',
+    )
+    result = grim.run_lint(tmp_path, fix=True)
+    assert "E032" in codes(result.findings)
+    assert result.fixed == []
+
+
+def test_duplicate_supersede_entry_is_not_two_live_successors(tmp_path):
+    # A repeated target is idempotent, not a fork. Counting occurrences made
+    # E031 report "'adr-old' has 2 live successors (adr-new, adr-new)".
+    write_component(tmp_path, "adr", "old", status="superseded")
+    write_component(
+        tmp_path, "adr", "new", status="current",
+        extra={"supersedes": "[adr-old, adr-old]"},
+    )
+    assert grim.check_edges(load(tmp_path)) == []
