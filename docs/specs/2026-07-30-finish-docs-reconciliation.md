@@ -5,9 +5,12 @@ components:
   - adr-write-then-ask-grim
   - adr-waiver-mechanisms
   - term-path-waiver
+implemented: "2026-07-31 (PR #17)"
 ---
 
 <!-- grim:status -->
+> **Implemented 2026-07-31 (PR #17).**
+> References current.
 <!-- /grim:status -->
 
 # Finish-docs Reconciliation - Design

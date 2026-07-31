@@ -1,7 +1,8 @@
 ---
 id: term-path-waiver
 type: term
-status: draft
+status: current
+supersedes: [term-waiver]
 date: 2026-07-30
 ---
 
@@ -13,4 +14,4 @@ subset of its declared paths, and a mandatory reason, and covers those paths
 permanently; it is echoed as W073. The trailer is deaf once and has to be
 re-justified next time; the standing waiver is deaf until someone deletes it.
 
-_Avoid_: blanket waiver, silent bypass.
+_Avoid_: override, exemption, blanket waiver, silent bypass.

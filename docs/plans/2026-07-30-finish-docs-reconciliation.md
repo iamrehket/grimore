@@ -3,6 +3,8 @@ spec: docs/specs/2026-07-30-finish-docs-reconciliation.md
 ---
 
 <!-- grim:status -->
+> **Implemented 2026-07-31 (PR #17).**
+> References current.
 <!-- /grim:status -->
 
 # Finish-docs Reconciliation (IAM-44) Implementation Plan

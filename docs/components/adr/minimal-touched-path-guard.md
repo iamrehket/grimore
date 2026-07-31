@@ -1,7 +1,7 @@
 ---
 id: adr-minimal-touched-path-guard
 type: adr
-status: current
+status: superseded
 date: 2026-07-24
 ---
 

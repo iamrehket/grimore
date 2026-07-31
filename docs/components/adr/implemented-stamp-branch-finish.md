@@ -1,7 +1,7 @@
 ---
 id: adr-implemented-stamp-branch-finish
 type: adr
-status: draft
+status: current
 date: 2026-07-30
 ---
 

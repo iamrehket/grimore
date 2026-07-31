@@ -1,7 +1,7 @@
 ---
 id: adr-reconcile-verdict-explicit
 type: adr
-status: draft
+status: current
 date: 2026-07-30
 ---
 
