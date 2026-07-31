@@ -1,7 +1,7 @@
 ---
 id: adr-payload-renderer-split
 type: adr
-status: draft
+status: current
 paths: [explain-diff/]
 date: 2026-07-13
 ---

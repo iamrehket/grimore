@@ -344,3 +344,103 @@ def test_divergent_local_default_branch_is_ignored_when_origin_resolves(tmp_path
     commit_all(clone, "feature tweak, no waiver")
     codes = lint_codes(clone)
     assert "E070" in codes and "W071" not in codes
+
+
+def multi_path_repo(tmp_path):
+    """A component declaring two distinct paths, both populated, then a branch."""
+    make_repo(tmp_path)
+    write_component(
+        tmp_path, "note", "renderer",
+        extra={"subsystem": "renderer", "paths": "[src/render/, manifest.json]"},
+    )
+    src = tmp_path / "src" / "render"
+    src.mkdir(parents=True)
+    (src / "x.py").write_text("x = 1\n")
+    (tmp_path / "manifest.json").write_text('{"version": "1.0.0"}\n')
+    commit_all(tmp_path, "baseline")
+    git(tmp_path, "checkout", "-b", "feature")
+    return src
+
+
+def with_standing_waiver(root, paths, reason="version bumps; the contract is unchanged"):
+    (root / ".grimore.toml").write_text(
+        "[grimore]\n\n[[grimore.standing_waiver]]\n"
+        'component = "note-renderer"\n'
+        f"paths = [{', '.join(repr(p) for p in paths)}]\n"
+        f"reason = {reason!r}\n",
+        encoding="utf-8",
+    )
+
+
+def test_standing_waiver_suppresses_a_covered_path(tmp_path):
+    multi_path_repo(tmp_path)
+    (tmp_path / "manifest.json").write_text('{"version": "1.1.0"}\n')
+    with_standing_waiver(tmp_path, ["manifest.json"])
+    commit_all(tmp_path, "bump version")
+    assert lint_codes(tmp_path) == ["W073"]
+    [f] = [f for f in grim.run_lint(tmp_path).findings if f.code == "W073"]
+    assert "manifest.json" in f.message and "contract is unchanged" in f.message
+
+
+def test_standing_waiver_still_gates_an_uncovered_path(tmp_path):
+    # Scoped to a component AND a path subset: everything else still gates.
+    src = multi_path_repo(tmp_path)
+    (src / "x.py").write_text("x = 2\n")
+    with_standing_waiver(tmp_path, ["manifest.json"])
+    commit_all(tmp_path, "tweak renderer")
+    assert lint_codes(tmp_path) == ["E070"]
+
+
+def test_mixed_hits_report_both_the_waiver_and_the_error(tmp_path):
+    # The load-bearing case. Emitting W073 only when nothing remains would hide
+    # the permanently-deaf subset behind the E070 raised by the other path.
+    src = multi_path_repo(tmp_path)
+    (src / "x.py").write_text("x = 2\n")
+    (tmp_path / "manifest.json").write_text('{"version": "1.1.0"}\n')
+    with_standing_waiver(tmp_path, ["manifest.json"])
+    commit_all(tmp_path, "bump and tweak")
+    assert sorted(lint_codes(tmp_path)) == ["E070", "W073"]
+
+
+def test_mixed_hits_with_a_trailer_report_both(tmp_path):
+    src = multi_path_repo(tmp_path)
+    (src / "x.py").write_text("x = 2\n")
+    (tmp_path / "manifest.json").write_text('{"version": "1.1.0"}\n')
+    with_standing_waiver(tmp_path, ["manifest.json"])
+    commit_all(tmp_path, "bump and tweak\n\nGrim-Waive: note-renderer deliberate")
+    assert sorted(lint_codes(tmp_path)) == ["W071", "W073"]
+
+
+def test_standing_waiver_is_silent_when_nothing_was_touched(tmp_path):
+    # Permanent config must not mean a permanent warning on every branch.
+    multi_path_repo(tmp_path)
+    (tmp_path / "unrelated.txt").write_text("hello\n")
+    with_standing_waiver(tmp_path, ["manifest.json"])
+    commit_all(tmp_path, "unrelated change")
+    assert lint_codes(tmp_path) == []
+
+
+def test_standing_waiver_for_unknown_component_is_e073(tmp_path):
+    # Components are never deleted, so an unresolvable name is always a typo -
+    # and silent, since the waiver simply fails to apply.
+    multi_path_repo(tmp_path)
+    (tmp_path / ".grimore.toml").write_text(
+        "[grimore]\n\n[[grimore.standing_waiver]]\n"
+        'component = "note-typo"\npaths = ["manifest.json"]\nreason = "x"\n',
+        encoding="utf-8",
+    )
+    commit_all(tmp_path, "waiver with a typo")
+    assert "E073" in lint_codes(tmp_path)
+
+
+def test_e070_names_all_three_legal_remedies(tmp_path):
+    src = guarded_repo(tmp_path)
+    (src / "x.py").write_text("x = 2\n")
+    commit_all(tmp_path, "tweak renderer")
+    [f] = [f for f in grim.run_lint(tmp_path).findings if f.code == "E070"]
+    # Updating a current component is forbidden by SCHEMA, so the old advice
+    # ("update it or record a waiver") was wrong for every component it gates.
+    assert "update it" not in f.message
+    assert "supersede" in f.message
+    assert "Grim-Waive: note-renderer" in f.message  # exact trailer, still
+    assert "standing_waiver" in f.message

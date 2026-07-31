@@ -37,7 +37,12 @@ def test_check_passes_on_fresh_render(tmp_path):
 
 def test_check_fails_on_stale_committed_render(tmp_path):
     fresh_repo(tmp_path)
-    write_component(tmp_path, "adr", "why", body="# Why\n\nChanged.")
+    # Staleness is introduced by ADDING a component, not by editing the
+    # committed one. Rewriting a component that was `current` at the merge-base
+    # is an illegal in-place edit (E043), and run_check refuses to byte-compare
+    # against a store it already knows is broken - so that vehicle would assert
+    # nothing about staleness. New components are exempt from E043 by design.
+    write_component(tmp_path, "adr", "later", body="# Later\n\nProse.")
     result = grim.run_check(tmp_path)
     assert [f.code for f in result.mismatches] == ["E080"]
     assert result.exit_code == 1

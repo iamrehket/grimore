@@ -32,6 +32,12 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _grim_module  # noqa: E402 - sibling module, resolved from this file's directory
+
+# Pure helpers only; every rule still comes from the lint subprocess.
+REQUIRED_GRIM_API = ("load_config", "load_store", "supersede_index", "abandoned_references")
+
 FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PR_RE = re.compile(r"^\d+$")
@@ -218,7 +224,24 @@ def discover_from_diff(root: Path, specs_dir: Path, default_branch: str) -> list
     return sorted(set(out))
 
 
-def classify(path: Path, statuses: dict[str, str]) -> tuple[str, str]:
+def abandoned_ids(root: Path, grim) -> set[str]:
+    """Components superseded with nothing live replacing them.
+
+    grim owns the reachability rule; asking it is the point. Recomputing the
+    walk here is exactly the class of duplication that produced eleven
+    divergences across two review rounds of phase A.
+    """
+    store = grim.load_store(grim.load_config(root))
+    statuses = {
+        c.cid: c.status
+        for c in store.components
+        if isinstance(c.cid, str) and isinstance(c.status, str)
+    }
+    index = grim.supersede_index(store)
+    return set(grim.abandoned_references(list(statuses), statuses, index))
+
+
+def classify(path: Path, statuses: dict[str, str], abandoned_store: set[str]) -> tuple[str, str]:
     """What to do with this spec, and why - one of skip, refuse, stamp."""
     raw, m, fm = read_frontmatter(path)
     if m is None or fm is None:
@@ -251,7 +274,19 @@ def classify(path: Path, statuses: dict[str, str]) -> tuple[str, str]:
     if drafts:
         return REFUSE, (
             f"still draft, so nothing justifies an implemented claim: {', '.join(drafts)}"
-            " (reconciliation is phase B)"
+            " - reconcile them first"
+        )
+    # Abandoning every component a spec created says the opposite of what the
+    # stamp asserts. The two are indistinguishable from status alone, because
+    # `superseded` is written both by "replaced" and by "never built" - and a
+    # replaced decision *was* implemented, which is why superseded does not
+    # otherwise block a stamp. Reachability is the signal that survives.
+    abandoned = sorted(c for c in components if c in abandoned_store)
+    if components and abandoned and len(abandoned) == len(components):
+        return REFUSE, (
+            f"every component this spec created was abandoned with no live successor "
+            f"({', '.join(abandoned)}); nothing was built, so an implemented claim "
+            "would be false"
         )
     # grim only warns (W090) about a spec with no banner block, and warnings do
     # not fail grim check - so a stamp written here would land with nowhere to
@@ -320,9 +355,12 @@ def main(argv: list[str] | None = None) -> int:
     # Before anything is read for a decision or written to disk. grim decides
     # whether the store, the config and the working layer are valid; this
     # script only judges what grim has no opinion about.
+    grim_path = (args.grim or root / "tools" / "grim.py").resolve()
     try:
-        grim_preflight(root, (args.grim or root / "tools" / "grim.py").resolve())
-    except PreflightError as exc:
+        grim_preflight(root, grim_path)
+        grim = _grim_module.load_grim(grim_path, REQUIRED_GRIM_API)
+        abandoned_store = abandoned_ids(root, grim)
+    except (PreflightError, _grim_module.GrimImportError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -357,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
     refused = False
     for path in sorted(set(targets)):
         rel = path.relative_to(root).as_posix()
-        action, why = classify(path, statuses)
+        action, why = classify(path, statuses, abandoned_store)
         if action == STAMP:
             if not args.dry_run:
                 write_stamp(path, value)

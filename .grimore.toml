@@ -6,3 +6,12 @@ plans = "docs/plans"
 default_branch = "main"
 types = ["adr", "term", "usecase", "constraint", "nongoal", "note"]
 instruction_files = ["CLAUDE.md", "AGENTS.md"]
+
+# The manifests carry one shared version and description across two hosts, and
+# both move on every consumer-facing release for reasons the dual-manifest
+# decision does not govern. See adr-waiver-mechanisms for why this is a
+# standing waiver rather than a trailer rewritten every time.
+[[grimore.standing_waiver]]
+component = "adr-dual-plugin-manifests"
+paths = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
+reason = "shared release metadata (version and description); the two-manifest contract is unchanged"

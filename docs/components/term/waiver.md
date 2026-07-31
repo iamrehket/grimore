@@ -1,7 +1,7 @@
 ---
 id: term-waiver
 type: term
-status: current
+status: superseded
 date: 2026-07-24
 ---
 

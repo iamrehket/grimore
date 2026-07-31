@@ -33,11 +33,12 @@ def git(root, *args):
     return result.stdout
 
 
-def write_component(root, slug, status="current"):
+def write_component(root, slug, status="current", supersedes=None):
     d = root / "docs" / "components" / "adr"
     d.mkdir(parents=True, exist_ok=True)
+    edge = f"supersedes: [{', '.join(supersedes)}]\n" if supersedes else ""
     (d / f"{slug}.md").write_text(
-        f"---\nid: adr-{slug}\ntype: adr\nstatus: {status}\ndate: 2026-07-24\n---\n\nBody.\n",
+        f"---\nid: adr-{slug}\ntype: adr\nstatus: {status}\n{edge}date: 2026-07-24\n---\n\nBody.\n",
         encoding="utf-8",
     )
 
@@ -162,9 +163,41 @@ def test_refuses_malformed_components(tmp_path):
 
 
 def test_superseded_components_do_not_block_a_stamp(tmp_path):
-    """A spec whose decisions have since been superseded was still implemented."""
+    """A spec whose decisions have since been REPLACED was still implemented.
+
+    The successor is load-bearing, not scenery. Status alone cannot tell a
+    replacement from an abandonment - both read `superseded` - so the fixture
+    has to carry the live successor that makes this a replacement.
+    """
     write_component(tmp_path, "old", status="superseded")
+    write_component(tmp_path, "new", status="current", supersedes=["adr-old"])
     spec = write_spec(tmp_path, raw_fm="components: [adr-old]")
+    r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
+    assert r.returncode == 0, r.stderr
+    assert "implemented" in spec.read_text(encoding="utf-8")
+
+
+def test_wholly_abandoned_spec_is_refused(tmp_path):
+    """Abandoning every component says the opposite of what the stamp asserts.
+
+    Reachability is the only surviving signal: `superseded` is written both by
+    "replaced" and by "never built", and the derived banner renders a bare
+    "Superseded." for both. Without this, reconcile's `drop` outcome would
+    launder unbuilt work into a governed "Implemented" claim.
+    """
+    write_component(tmp_path, "never-built", status="superseded")
+    spec = write_spec(tmp_path, raw_fm="components: [adr-never-built]")
+    r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
+    assert r.returncode == 1
+    assert "abandoned with no live successor" in r.stderr
+    assert "implemented" not in spec.read_text(encoding="utf-8")
+
+
+def test_partially_abandoned_spec_still_stamps(tmp_path):
+    """One shipped, one dropped: implemented in part, and the banner says so."""
+    write_component(tmp_path, "shipped", status="current")
+    write_component(tmp_path, "dropped", status="superseded")
+    spec = write_spec(tmp_path, raw_fm="components: [adr-shipped, adr-dropped]")
     r = run(tmp_path, "--spec", "docs/specs/a.md", "--date", "2026-07-27")
     assert r.returncode == 0, r.stderr
     assert "implemented" in spec.read_text(encoding="utf-8")
