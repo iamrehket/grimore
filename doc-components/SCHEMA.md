@@ -48,10 +48,28 @@ Frontmatter field order is not significant.
 - A `supersedes:` edge is authored on the new component (usually while it
   is a draft) and **takes effect at promotion**: when the new component
   becomes `current`, each edge target flips to `superseded` in the same
-  pass.
+  pass. `E032` enforces this — a `current` component whose target is still
+  `current` is an error, because both decisions then render into the
+  consumer view as live and nothing says which one holds. It is not
+  auto-fixable: which decision stands is a judgement, not formatting.
 - Drafts are the only place in-place edits are allowed, and an amendment
   must never reverse a decision's substance — if the decision itself
-  changed, abandon the draft and write a new component.
+  changed, abandon the draft and write a new component. `E043` enforces
+  this, comparing against the merge-base: a component that was not `draft`
+  there may change its `status` and nothing else. Amending a draft and
+  promoting it on the same branch stays legal, which is why the gate is the
+  status at the merge-base rather than at HEAD.
+- **Abandoned is not superseded-with-a-successor.** Both write status
+  `superseded`, and the derived banner renders "Superseded." for either, so
+  the distinction lives in reachability: a replaced decision leaves a live
+  successor, an abandoned one does not. This matters because a replaced
+  decision *was* implemented while an abandoned one never was — see the
+  `implemented:` rules below.
+- A branch's view of the store is the branch's own. Reconciliation flips a
+  component to `superseded` before the pull request merges, so the branch
+  asserts a replacement the default branch has not yet accepted. That is
+  intended; `E031` catches two branches racing the same target once both
+  land.
 - **Reconcile error:** one component with two or more live successors is
   invalid; the branch that surfaces it must resolve which successor
   stands.
@@ -62,6 +80,31 @@ Frontmatter field order is not significant.
 ### Touched-path guard
 
 Only `current` components gate. The guard sees tracked changes vs the merge-base. Waivers are echoed in lint output (`W071`) so reviewers see every bypass. Coverage grows as `paths:` get declared. A waiver covers its component for the remainder of the branch (the whole merge-base..HEAD range), not just the change it was written for - if the branch grows after a waiver lands, re-review it.
+
+A hit has three legal remedies, and amending the component is not one of
+them — only drafts may be edited in place. Supersede it with a new
+component; record a `Grim-Waive:` trailer; or, when a declared path churns
+for reasons the decision does not govern, declare a **standing waiver** in
+`.grimore.toml`:
+
+    [[grimore.standing_waiver]]
+    component = "adr-dual-plugin-manifests"
+    paths = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
+    reason = "shared metadata churn; the manifest contract is unchanged"
+
+All three keys are required and `reason` must be non-empty — a bypass
+nobody has to justify is not reviewable. It is scoped to one component
+**and** a subset of its declared paths, so the component still gates on
+everything else it declares; `E073` catches a name that resolves to no
+component, which is always a typo since components are never deleted.
+`W073` echoes every standing waiver that suppressed something, including
+when other paths on the same component still raise `E070` — otherwise the
+permanently-ignored subset disappears behind the error.
+
+Choose deliberately: a `Grim-Waive` trailer is deaf once and makes you
+re-justify it next time, while a standing waiver is **permanently deaf**
+for the paths it names. A genuine restructure of a standing-waived file
+fires nothing. Keep the list short.
 
 ## Body formats
 
@@ -91,6 +134,18 @@ Specs (session artifacts, frozen after implementation):
   start of a comment and the value silently truncates to `2026-07-24 (PR`.
   A bare `implemented: 2026-07-24` is also accepted and coerced; every
   other shape is rejected rather than parsed into a fragment.
+- **The stamp records the branch-finish event**: the date the work was
+  completed and the pull request it was submitted in. It is not a merge
+  date. Merge is implied by the file's presence on the default branch —
+  anything you read on `main` got merged, and an abandoned branch's stamp
+  never arrives there, so no reader meets a false claim. Accepted cost: a
+  pull request that sits for three days stamps three days early. This is
+  the definition, not an approximation of a merge date.
+- **A spec whose components were all abandoned cannot be stamped.** The
+  stamp asserts the work was implemented; abandoning everything the session
+  created asserts the opposite. `E095` catches the state wherever it came
+  from, and finish-docs refuses to write it in the first place. A spec
+  implemented only in part still stamps — the banner reports the shortfall.
 - The banner block delimited by `<!-- grim:status -->` and
   `<!-- /grim:status -->` is script-owned: grim lint --fix rewrites it;
   humans and agents never edit inside it. Everything outside the block is
