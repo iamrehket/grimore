@@ -1,7 +1,7 @@
 {
   "name": "grimore",
-  "version": "1.3.0",
-  "description": "Skills from the grimore doc-components system: align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), adopt-docs (onboard a repo onto doc components), and finish-docs (branch-finish sync; spec discovery and the implemented stamp, refusing specs whose components are still draft until reconciliation lands).",
+  "version": "1.4.0",
+  "description": "Skills from the grimore doc-components system: align (brainstorm interview with inline component capture), explain-diff (diff explanation guides), adopt-docs (onboard a repo onto doc components), and finish-docs (branch-finish sync: reconciles each draft component against the diff, writes supersede edges, and records the implemented stamp, refusing any claim it cannot verify).",
   "author": {
     "name": "Adam Albright",
     "email": "aalbright@iamrehket.me"
