@@ -7,9 +7,9 @@ must fail against this tree.
 """
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 # finish-docs/tests/make_fixture.py -> the repository root three levels up.
@@ -210,12 +210,60 @@ def export_orders(cursor, out, columns):
         writer.writerow([row[name] for name in columns])
 '''
 
+# The `contradicted` scenario. The draft says column order is declared per
+# tenant in configuration and that a column missing from the configuration is
+# dropped. This code does neither: order follows the cursor, and callers are
+# expected to read by header name instead. The decision changed, so promoting
+# the draft would leave a current component asserting something false.
+#
+# The trap is that it reads as done at a glance - the configuration key is
+# still there, the plan's tasks all look satisfied, and the export plainly
+# handles columns. Nothing in the diff announces that config.py is now dead.
+CODE_AFTER_CONTRADICTED = '''\
+"""Order exports."""
+
+import csv
+
+
+def export_orders(cursor, out):
+    """Stream rows to `out` as CSV, header first, in whatever order the
+    query selected. Callers read by header name rather than by position."""
+    writer = csv.writer(out, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(cursor.column_names)
+    for row in cursor:
+        writer.writerow(list(row))
+'''
+
+CONFIG_BEFORE = '''\
+"""Per-tenant settings."""
+
+# Column order per tenant, applied by the export writer.
+COLUMN_ORDER = {}
+'''
+
+CONFIG_AFTER = '''\
+"""Per-tenant settings."""
+
+# Column order per tenant. No longer read: exports emit a header row and
+# callers match on names.
+COLUMN_ORDER = {}
+'''
+
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: make_fixture.py <fixture-root>", file=sys.stderr)
-        return 2
-    root = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description="Build a finish-docs test fixture.")
+    parser.add_argument("root")
+    # A separate scenario rather than a mutation of the first: baseline-red.md
+    # and baseline-green.md are scored against the `shipped` tree, and
+    # baseline-green's rubric line 8 is verified by replaying the mechanical
+    # path from its pre-run commit. Changing that tree in place would
+    # retroactively invalidate both writeups.
+    parser.add_argument("--scenario", choices=("shipped", "contradicted"),
+                        default="shipped")
+    args = parser.parse_args()
+    contradicted = args.scenario == "contradicted"
+
+    root = Path(args.root).resolve()
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
@@ -234,6 +282,8 @@ def main() -> int:
     write(root, "docs/components/adr/streaming-writer.md", STREAMING_WRITER)
     write(root, "src/exports.py", CODE_BEFORE)
     write(root, "README.md", "# acme-exports\n\nOrder export service.\n")
+    if contradicted:
+        write(root, "src/config.py", CONFIG_BEFORE)
 
     # Render main's committed view with grim itself, so the bytes are whatever
     # grim produces rather than whatever this script guesses.
@@ -254,11 +304,13 @@ def main() -> int:
     write(root, "docs/specs/2026-07-21-column-order.md", SPEC_COLUMN_ORDER)
     write(root, "docs/plans/2026-07-20-exports.md", PLAN_EXPORTS)
     write(root, "docs/plans/2026-07-21-column-order.md", PLAN_COLUMN_ORDER)
-    write(root, "src/exports.py", CODE_AFTER)
+    write(root, "src/exports.py", CODE_AFTER_CONTRADICTED if contradicted else CODE_AFTER)
+    if contradicted:
+        write(root, "src/config.py", CONFIG_AFTER)
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "feat: stream CSV exports in configured column order")
 
-    print(f"fixture at {root}")
+    print(f"fixture at {root} ({args.scenario})")
     return 0
 
 
