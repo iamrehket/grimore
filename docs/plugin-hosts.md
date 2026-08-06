@@ -8,7 +8,8 @@ must carry the same name, version, description, author, and ordered skill
 paths.
 
 The commands below were verified on 2026-07-27 with Claude Code `2.1.220` and
-Codex CLI `0.145.0`. They use the repository marketplace name `grimore` and
+Codex CLI `0.145.0`, and re-verified on 2026-08-06 with Claude Code `2.1.223`
+and Codex CLI `0.146.0`. They use the repository marketplace name `grimore` and
 the plugin selector `grimore@grimore`. They install no helper packages; the
 host CLIs, Git, and standard shell archive tools are the only prerequisites.
 
@@ -63,6 +64,12 @@ claude plugin uninstall grimore@grimore --scope user
 claude plugin marketplace remove grimore --scope user
 claude plugin marketplace list
 ```
+
+Both commands report success and `plugin list` returns empty, but the cached
+payload stays on disk under `plugins/cache/grimore/grimore/<version>/`.
+Removing it is a separate manual step. Codex differs here - its `plugin
+remove` drops the plugin from local config *and* cache - so a cleanup routine
+written against one host will leave state behind on the other.
 
 ## Codex
 

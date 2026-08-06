@@ -1,7 +1,7 @@
 ---
 id: usecase-catch-up-digest
 type: usecase
-status: current
+status: superseded
 date: 2026-07-24
 ---
 

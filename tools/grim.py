@@ -847,6 +847,366 @@ def abandoned_references(
     )
 
 
+# The hash of the empty tree, so the root commit can be diffed against
+# something instead of being special-cased out of the walk.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# Every transition the lifecycle permits, and what the digest calls it.
+# Anything absent from this table is reported as a violation rather than
+# skipped: the schema forbids those, which is exactly why observing one is
+# worth saying.
+EVENT_LABELS = {
+    ("absent", "draft"): "added, draft",
+    ("absent", "current"): "added, live",
+    ("absent", "superseded"): "added, already superseded",
+    ("draft", "current"): "promoted",
+    ("draft", "superseded"): "abandoned",
+    ("current", "superseded"): "superseded",
+}
+
+
+@dataclasses.dataclass
+class Event:
+    """One component's transition at one landed commit."""
+
+    cid: str
+    prev: str
+    curr: str
+    label: str
+    commit: str  # abbreviated
+    date: str  # ISO date in UTC
+    violation: bool
+    specs: tuple[str, ...] = ()  # repo-relative paths of the specs claiming it
+
+
+def _blob_status(cfg: Config, rev: str, rel: str) -> tuple[str | None, str | None]:
+    """(status, id) of a component blob, or (None, None) when it is not there."""
+    r = _git(cfg, "show", f"{rev}:{rel}")
+    if r.returncode != 0:
+        return None, None
+    m = FM_RE.match(r.stdout)
+    if not m:
+        return None, None
+    try:
+        fm = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return None, None
+    if not isinstance(fm, dict):
+        return None, None
+    coerce_fm(fm)
+    status = fm.get("status")
+    cid = fm.get("id")
+    return (status if isinstance(status, str) else None,
+            cid if isinstance(cid, str) else None)
+
+
+def _commit_utc_date(cfg: Config, sha: str) -> str:
+    """The commit's day in UTC.
+
+    Read as an epoch and converted here rather than with `--date=short`, which
+    renders in the offset the commit recorded. That is stable across machines,
+    so it survives every determinism check while still landing a commit made
+    just after local midnight at +1300 on the wrong day.
+    """
+    epoch = int(_git(cfg, "log", "-1", "--format=%ct", sha).stdout.strip())
+    return datetime.datetime.fromtimestamp(
+        epoch, datetime.timezone.utc
+    ).date().isoformat()
+
+
+def walk_events(cfg: Config, ref: str = "HEAD", *, drop_graft: bool = False) -> list[Event]:
+    """Component transitions along ref's first-parent line, oldest commit first.
+
+    First-parent is what makes a pull request one event: a merge landing hides
+    the branch's own commits, and a squash landing has none to hide. The whole
+    line is walked and never cut short on a date, because git timestamps are
+    not monotonic - a rebase, a cherry-pick, or plain clock skew can put an
+    older commit behind a newer one, so meeting one proves nothing about its
+    ancestors. Filtering by date is the caller's job.
+
+    drop_graft discards the events of any parentless commit. In a truncated
+    clone the oldest visible commit has no parent to diff against, so every
+    component present there looks newly added - a confident wrong answer about
+    decisions that may have been live for months. Callers set it when the
+    repository is shallow; on a complete history the root commit genuinely
+    does introduce its components, so it stays off.
+    """
+    top = _git(cfg, "rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        return []
+    toplevel = Path(top.stdout.strip())
+    try:
+        comp_rel = cfg.components.resolve().relative_to(toplevel.resolve()).as_posix()
+    except ValueError:
+        return []
+
+    revs = _git(cfg, "rev-list", "--first-parent", "--reverse", ref)
+    if revs.returncode != 0:
+        return []
+
+    events: list[Event] = []
+    for sha in revs.stdout.split():
+        parents = _git(cfg, "rev-list", "--parents", "-n1", sha).stdout.split()[1:]
+        if not parents and drop_graft:
+            continue
+        base = parents[0] if parents else EMPTY_TREE
+        diff = _git(
+            cfg, "diff", "--name-status", "--no-renames", base, sha, "--", comp_rel
+        )
+        if diff.returncode != 0 or not diff.stdout.strip():
+            continue
+        date = _commit_utc_date(cfg, sha)
+        short = _git(cfg, "rev-parse", "--short", sha).stdout.strip()
+        batch: list[Event] = []
+        for line in diff.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            rel = parts[1]
+            prev_status, prev_id = _blob_status(cfg, base, rel)
+            curr_status, curr_id = _blob_status(cfg, sha, rel)
+            cid = curr_id or prev_id
+            if cid is None:
+                # Neither side parses as a component - a malformed file lint
+                # will complain about. Nothing here can name a transition.
+                continue
+            prev = prev_status or "absent"
+            curr = curr_status or "absent"
+            if prev == curr:
+                continue
+            label = EVENT_LABELS.get((prev, curr))
+            batch.append(
+                Event(
+                    cid=cid,
+                    prev=prev,
+                    curr=curr,
+                    label=label or "lifecycle violation",
+                    commit=short,
+                    date=date,
+                    violation=label is None,
+                )
+            )
+        events.extend(sorted(batch, key=lambda e: e.cid))
+    return events
+
+
+@dataclasses.dataclass
+class DigestResult:
+    events: list[Event]
+    truncated: bool  # history was incomplete, so the answer is bounded by it
+    ref: str
+    since: str | None
+
+
+def spec_index(cfg: Config) -> dict[str, tuple[str, ...]]:
+    """component id -> the specs claiming it, as repo-relative paths.
+
+    Built only over the configured specs directory. An ungoverned tree of
+    spec-shaped files must not contribute provenance, and the two legacy design
+    specs in this repository carry no frontmatter at all, so tolerating that is
+    the normal case rather than defensive coding - the shared loader already
+    reports frontmatter it could not parse as absent.
+
+    Several specs claiming one component is a store defect, not an expected
+    case: nothing in lint forbids it, but the schema describes `components:` as
+    the ids a session created. Listing all of them sorted keeps the output
+    deterministic when one occurs instead of picking arbitrarily.
+    """
+    docs, _ = _load_working_docs(cfg)
+    claims: dict[str, list[str]] = {}
+    for doc in docs:
+        if doc.kind != "spec" or not doc.fm:
+            continue
+        listed = doc.fm.get("components")
+        if not isinstance(listed, list):
+            continue
+        for cid in listed:
+            if isinstance(cid, str):
+                claims.setdefault(cid, []).append(doc.rel)
+    return {cid: tuple(sorted(paths)) for cid, paths in claims.items()}
+
+
+def resolve_walk_ref(cfg: Config) -> str | None:
+    """The line the digest walks: remote-tracking first, then local.
+
+    Same order and same reason as the merge-base resolution - origin/<default>
+    is what a pull request actually merges into, so a stale or divergent local
+    ref must never be preferred. This resolves the ref and nothing else; it is
+    not a test of whether history is deep enough, which is a different failure
+    that a deep-enough shallow clone passes.
+    """
+    for ref in (f"origin/{cfg.default_branch}", cfg.default_branch):
+        if _git(cfg, "rev-parse", "--verify", "--quiet", ref).returncode == 0:
+            return ref
+    return None
+
+
+def is_shallow(cfg: Config) -> bool:
+    r = _git(cfg, "rev-parse", "--is-shallow-repository")
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def digest(cfg: Config, *, since: str | None = None, ref: str | None = None) -> DigestResult:
+    """Lifecycle events on the default branch, optionally bounded by date.
+
+    `since` is inclusive of the named day and resolves in UTC, so the answer
+    does not depend on the timezone of the machine asking.
+
+    On a truncated clone the digest still answers, from the earliest commit it
+    can see, and says so. The flag is unconditional: because timestamps are not
+    monotonic, a graft point earlier than the boundary is no proof that the
+    part we cannot see held nothing in range. Over-reporting incompleteness is
+    the safe direction; the unsafe one is a partial answer that looks whole.
+    """
+    if since is not None:
+        datetime.date.fromisoformat(since)  # raises on a malformed boundary
+    ref = ref or resolve_walk_ref(cfg) or "HEAD"
+    truncated = is_shallow(cfg)
+    events = walk_events(cfg, ref, drop_graft=truncated)
+    if since is not None:
+        events = [e for e in events if e.date >= since]
+    claims = spec_index(cfg)
+    for event in events:
+        event.specs = claims.get(event.cid, ())
+    return DigestResult(events=events, truncated=truncated, ref=ref, since=since)
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+BUNDLE_SECTION_ORDER = ("charter.md", "decisions.md", "glossary.md")
+
+
+def _strip_render_header(text: str) -> str:
+    """Drop a rendered view's provenance comments; the bundle states its own once."""
+    lines = text.split("\n")
+    while lines and lines[0].startswith("<!--"):
+        lines.pop(0)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def bundle_revision(cfg: Config) -> tuple[str | None, bool | None]:
+    """(short revision, whether the component store differs from it).
+
+    Scoped to the component store and nothing else. The bundle's declared
+    inputs are the store, the configuration, and the revision, so a change
+    anywhere else in the working tree must not reach the output - checking the
+    whole tree would make an unrelated edit alter the bytes, which the
+    determinism constraint forbids.
+    """
+    rev = _git(cfg, "rev-parse", "--short", "HEAD")
+    if rev.returncode != 0:
+        return None, None
+    revision = rev.stdout.strip()
+    try:
+        top = Path(_git(cfg, "rev-parse", "--show-toplevel").stdout.strip())
+        comp_rel = cfg.components.resolve().relative_to(top.resolve()).as_posix()
+    except (ValueError, OSError):
+        return revision, None
+    status = _git(cfg, "status", "--porcelain", "--", comp_rel)
+    if status.returncode != 0:
+        return revision, None
+    return revision, bool(status.stdout.strip())
+
+
+def render_bundle(cfg: Config, store: Store) -> str:
+    """Every live component in one self-contained file.
+
+    Content and ordering are the committed rendered views verbatim, so a
+    reader holding both can line them up, and so this grows no second opinion
+    about what belongs where. What the bundle adds is provenance a directory
+    does not carry: the store it was compiled from, the revision it was
+    produced at, and whether the two agree - because it reads the working tree,
+    and a reader must never be told a revision describes bytes it does not.
+    """
+    live = [c for c in store.components if c.status == "current"]
+    revision, differs = bundle_revision(cfg)
+    if revision is None:
+        provenance = "No revision available; produced outside a git repository."
+    elif differs is None:
+        provenance = f"Produced at revision {revision}."
+    elif differs:
+        provenance = (
+            f"Produced at revision {revision}; the component store "
+            "differs from that revision."
+        )
+    else:
+        provenance = (
+            f"Produced at revision {revision}; the component store "
+            "matches that revision."
+        )
+
+    out = [
+        "# Component bundle",
+        "",
+        f"Store sha256:{store_hash(store)}. {_count(len(live), 'live component')}.",
+        provenance,
+    ]
+    rendered = render_store(store)
+    ordered = [name for name in BUNDLE_SECTION_ORDER if name in rendered]
+    ordered += sorted(name for name in rendered if name not in BUNDLE_SECTION_ORDER)
+    for name in ordered:
+        out += ["", "---", "", _strip_render_header(rendered[name]).rstrip("\n")]
+    return "\n".join(out) + "\n"
+
+
+TRUNCATION_NOTE = (
+    "History is truncated, so this covers only the commits this clone can see."
+)
+
+
+def render_digest(result: DigestResult) -> str:
+    """The catch-up digest, grouped by landing.
+
+    Landings are the organizing unit because that is what a returning reader
+    is reconstructing - a pull request is one thing that happened, not four
+    scattered entries. Within a landing, components are ordered by id, which
+    is arbitrary but stated: an order that is merely stable would satisfy a
+    byte-comparison against itself while leaving the next implementer free to
+    pick a different one.
+
+    Every event names its endpoints, so a violation needs no special phrasing
+    to say what it violated. The heading carries the commit, which is the
+    provenance for components no spec claims - the majority of them.
+
+    Nothing here depends on the time of the run, the locale, or the order the
+    filesystem happened to yield.
+    """
+    scope = f"Since {result.since}" if result.since else "All landings"
+    out = ["# Catch-up digest", ""]
+
+    if not result.events:
+        out.append(f"{scope} on {result.ref}. No component changes in range.")
+        if result.truncated:
+            out += ["", TRUNCATION_NOTE]
+        return "\n".join(out) + "\n"
+
+    landings: list[tuple[str, list[Event]]] = []
+    for event in result.events:
+        if landings and landings[-1][0] == event.commit:
+            landings[-1][1].append(event)
+        else:
+            landings.append((event.commit, [event]))
+
+    out.append(
+        f"{scope} on {result.ref}. "
+        f"{_count(len(result.events), 'event')} across "
+        f"{_count(len(landings), 'landing')}."
+    )
+    if result.truncated:
+        out += ["", TRUNCATION_NOTE]
+
+    for commit, events in landings:
+        out += ["", f"## {events[0].date} - {commit}", ""]
+        for event in events:
+            out.append(f"- {event.cid} - {event.label} ({event.prev} -> {event.curr})")
+            out += [f"  - {spec}" for spec in event.specs]
+    return "\n".join(out) + "\n"
+
+
 def parse_implemented(value) -> tuple[str, str | None]:
     """('2026-07-24', '14') from a stamp. Raises ValueError on any other shape.
 
@@ -1435,6 +1795,19 @@ def main(argv: list[str] | None = None) -> int:
     render_p = sub.add_parser("render", help="compile docs/current/ from current components")
     render_p.add_argument("--json", action="store_true", help="machine-readable output")
     render_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
+    exports = render_p.add_mutually_exclusive_group()
+    exports.add_argument(
+        "--digest", action="store_true",
+        help="print a catch-up summary of lifecycle events to stdout; writes nothing",
+    )
+    exports.add_argument(
+        "--bundle", action="store_true",
+        help="print the live store as one self-contained file to stdout; writes nothing",
+    )
+    render_p.add_argument(
+        "--since", metavar="YYYY-MM-DD",
+        help="bound --digest to landings on or after this day, in UTC",
+    )
     check_p = sub.add_parser("check", help="verify committed docs/current/ matches fresh render")
     check_p.add_argument("--json", action="store_true", help="machine-readable output")
     check_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
@@ -1456,6 +1829,25 @@ def main(argv: list[str] | None = None) -> int:
                 print(summary)
             return result.exit_code
         elif args.verb == "render":
+            if args.digest or args.bundle:
+                # Every rejection here is loud on purpose. A flag that is
+                # accepted and quietly ignored is worse than one refused: the
+                # caller believes they asked for something they did not get.
+                if args.json:
+                    render_p.error("--json does not apply to an export; it prints markdown")
+                if args.since and not args.digest:
+                    render_p.error("--since applies to --digest only")
+                cfg = load_config(args.root.resolve())
+                try:
+                    if args.digest:
+                        print(render_digest(digest(cfg, since=args.since)), end="")
+                    else:
+                        print(render_bundle(cfg, load_store(cfg)), end="")
+                except ValueError as exc:
+                    render_p.error(f"--since must be an ISO date (YYYY-MM-DD): {exc}")
+                return 0
+            if args.since:
+                render_p.error("--since applies to --digest only")
             result = run_render(args.root)
             if args.json:
                 print(result.to_json())
