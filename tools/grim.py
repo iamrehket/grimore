@@ -1075,6 +1075,84 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
+BUNDLE_SECTION_ORDER = ("charter.md", "decisions.md", "glossary.md")
+
+
+def _strip_render_header(text: str) -> str:
+    """Drop a rendered view's provenance comments; the bundle states its own once."""
+    lines = text.split("\n")
+    while lines and lines[0].startswith("<!--"):
+        lines.pop(0)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def bundle_revision(cfg: Config) -> tuple[str | None, bool | None]:
+    """(short revision, whether the component store differs from it).
+
+    Scoped to the component store and nothing else. The bundle's declared
+    inputs are the store, the configuration, and the revision, so a change
+    anywhere else in the working tree must not reach the output - checking the
+    whole tree would make an unrelated edit alter the bytes, which the
+    determinism constraint forbids.
+    """
+    rev = _git(cfg, "rev-parse", "--short", "HEAD")
+    if rev.returncode != 0:
+        return None, None
+    revision = rev.stdout.strip()
+    try:
+        top = Path(_git(cfg, "rev-parse", "--show-toplevel").stdout.strip())
+        comp_rel = cfg.components.resolve().relative_to(top.resolve()).as_posix()
+    except (ValueError, OSError):
+        return revision, None
+    status = _git(cfg, "status", "--porcelain", "--", comp_rel)
+    if status.returncode != 0:
+        return revision, None
+    return revision, bool(status.stdout.strip())
+
+
+def render_bundle(cfg: Config, store: Store) -> str:
+    """Every live component in one self-contained file.
+
+    Content and ordering are the committed rendered views verbatim, so a
+    reader holding both can line them up, and so this grows no second opinion
+    about what belongs where. What the bundle adds is provenance a directory
+    does not carry: the store it was compiled from, the revision it was
+    produced at, and whether the two agree - because it reads the working tree,
+    and a reader must never be told a revision describes bytes it does not.
+    """
+    live = [c for c in store.components if c.status == "current"]
+    revision, differs = bundle_revision(cfg)
+    if revision is None:
+        provenance = "No revision available; produced outside a git repository."
+    elif differs is None:
+        provenance = f"Produced at revision {revision}."
+    elif differs:
+        provenance = (
+            f"Produced at revision {revision}; the component store "
+            "differs from that revision."
+        )
+    else:
+        provenance = (
+            f"Produced at revision {revision}; the component store "
+            "matches that revision."
+        )
+
+    out = [
+        "# Component bundle",
+        "",
+        f"Store sha256:{store_hash(store)}. {_count(len(live), 'live component')}.",
+        provenance,
+    ]
+    rendered = render_store(store)
+    ordered = [name for name in BUNDLE_SECTION_ORDER if name in rendered]
+    ordered += sorted(name for name in rendered if name not in BUNDLE_SECTION_ORDER)
+    for name in ordered:
+        out += ["", "---", "", _strip_render_header(rendered[name]).rstrip("\n")]
+    return "\n".join(out) + "\n"
+
+
 TRUNCATION_NOTE = (
     "History is truncated, so this covers only the commits this clone can see."
 )
