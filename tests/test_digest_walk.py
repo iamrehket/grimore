@@ -108,7 +108,7 @@ def test_current_to_draft_is_a_violation(tmp_path):
 
     got = events_for(h, "adr-thing")[-1]
     assert got.violation
-    assert "current" in got.label and "draft" in got.label
+    assert (got.prev, got.curr) == ("current", "draft")
 
 
 def test_removal_is_a_violation(tmp_path):
@@ -120,7 +120,7 @@ def test_removal_is_a_violation(tmp_path):
 
     got = events_for(h, "adr-doomed")[-1]
     assert got.violation
-    assert "absent" in got.label
+    assert (got.prev, got.curr) == ("current", "absent")
 
 
 def test_superseded_to_current_is_a_violation(tmp_path):

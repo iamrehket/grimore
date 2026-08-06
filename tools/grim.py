@@ -980,7 +980,7 @@ def walk_events(cfg: Config, ref: str = "HEAD", *, drop_graft: bool = False) -> 
                     cid=cid,
                     prev=prev,
                     curr=curr,
-                    label=label or f"lifecycle violation: {prev} -> {curr}",
+                    label=label or "lifecycle violation",
                     commit=short,
                     date=date,
                     violation=label is None,
@@ -1069,6 +1069,64 @@ def digest(cfg: Config, *, since: str | None = None, ref: str | None = None) -> 
     for event in events:
         event.specs = claims.get(event.cid, ())
     return DigestResult(events=events, truncated=truncated, ref=ref, since=since)
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+TRUNCATION_NOTE = (
+    "History is truncated, so this covers only the commits this clone can see."
+)
+
+
+def render_digest(result: DigestResult) -> str:
+    """The catch-up digest, grouped by landing.
+
+    Landings are the organizing unit because that is what a returning reader
+    is reconstructing - a pull request is one thing that happened, not four
+    scattered entries. Within a landing, components are ordered by id, which
+    is arbitrary but stated: an order that is merely stable would satisfy a
+    byte-comparison against itself while leaving the next implementer free to
+    pick a different one.
+
+    Every event names its endpoints, so a violation needs no special phrasing
+    to say what it violated. The heading carries the commit, which is the
+    provenance for components no spec claims - the majority of them.
+
+    Nothing here depends on the time of the run, the locale, or the order the
+    filesystem happened to yield.
+    """
+    scope = f"Since {result.since}" if result.since else "All landings"
+    out = ["# Catch-up digest", ""]
+
+    if not result.events:
+        out.append(f"{scope} on {result.ref}. No component changes in range.")
+        if result.truncated:
+            out += ["", TRUNCATION_NOTE]
+        return "\n".join(out) + "\n"
+
+    landings: list[tuple[str, list[Event]]] = []
+    for event in result.events:
+        if landings and landings[-1][0] == event.commit:
+            landings[-1][1].append(event)
+        else:
+            landings.append((event.commit, [event]))
+
+    out.append(
+        f"{scope} on {result.ref}. "
+        f"{_count(len(result.events), 'event')} across "
+        f"{_count(len(landings), 'landing')}."
+    )
+    if result.truncated:
+        out += ["", TRUNCATION_NOTE]
+
+    for commit, events in landings:
+        out += ["", f"## {events[0].date} - {commit}", ""]
+        for event in events:
+            out.append(f"- {event.cid} - {event.label} ({event.prev} -> {event.curr})")
+            out += [f"  - {spec}" for spec in event.specs]
+    return "\n".join(out) + "\n"
 
 
 def parse_implemented(value) -> tuple[str, str | None]:
