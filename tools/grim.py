@@ -1795,6 +1795,19 @@ def main(argv: list[str] | None = None) -> int:
     render_p = sub.add_parser("render", help="compile docs/current/ from current components")
     render_p.add_argument("--json", action="store_true", help="machine-readable output")
     render_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
+    exports = render_p.add_mutually_exclusive_group()
+    exports.add_argument(
+        "--digest", action="store_true",
+        help="print a catch-up summary of lifecycle events to stdout; writes nothing",
+    )
+    exports.add_argument(
+        "--bundle", action="store_true",
+        help="print the live store as one self-contained file to stdout; writes nothing",
+    )
+    render_p.add_argument(
+        "--since", metavar="YYYY-MM-DD",
+        help="bound --digest to landings on or after this day, in UTC",
+    )
     check_p = sub.add_parser("check", help="verify committed docs/current/ matches fresh render")
     check_p.add_argument("--json", action="store_true", help="machine-readable output")
     check_p.add_argument("--root", type=Path, default=Path.cwd(), help="project root (default: cwd)")
@@ -1816,6 +1829,25 @@ def main(argv: list[str] | None = None) -> int:
                 print(summary)
             return result.exit_code
         elif args.verb == "render":
+            if args.digest or args.bundle:
+                # Every rejection here is loud on purpose. A flag that is
+                # accepted and quietly ignored is worse than one refused: the
+                # caller believes they asked for something they did not get.
+                if args.json:
+                    render_p.error("--json does not apply to an export; it prints markdown")
+                if args.since and not args.digest:
+                    render_p.error("--since applies to --digest only")
+                cfg = load_config(args.root.resolve())
+                try:
+                    if args.digest:
+                        print(render_digest(digest(cfg, since=args.since)), end="")
+                    else:
+                        print(render_bundle(cfg, load_store(cfg)), end="")
+                except ValueError as exc:
+                    render_p.error(f"--since must be an ISO date (YYYY-MM-DD): {exc}")
+                return 0
+            if args.since:
+                render_p.error("--since applies to --digest only")
             result = run_render(args.root)
             if args.json:
                 print(result.to_json())
