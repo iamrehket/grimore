@@ -876,6 +876,7 @@ class Event:
     commit: str  # abbreviated
     date: str  # ISO date in UTC
     violation: bool
+    specs: tuple[str, ...] = ()  # repo-relative paths of the specs claiming it
 
 
 def _blob_status(cfg: Config, rev: str, rel: str) -> tuple[str | None, str | None]:
@@ -997,6 +998,34 @@ class DigestResult:
     since: str | None
 
 
+def spec_index(cfg: Config) -> dict[str, tuple[str, ...]]:
+    """component id -> the specs claiming it, as repo-relative paths.
+
+    Built only over the configured specs directory. An ungoverned tree of
+    spec-shaped files must not contribute provenance, and the two legacy design
+    specs in this repository carry no frontmatter at all, so tolerating that is
+    the normal case rather than defensive coding - the shared loader already
+    reports frontmatter it could not parse as absent.
+
+    Several specs claiming one component is a store defect, not an expected
+    case: nothing in lint forbids it, but the schema describes `components:` as
+    the ids a session created. Listing all of them sorted keeps the output
+    deterministic when one occurs instead of picking arbitrarily.
+    """
+    docs, _ = _load_working_docs(cfg)
+    claims: dict[str, list[str]] = {}
+    for doc in docs:
+        if doc.kind != "spec" or not doc.fm:
+            continue
+        listed = doc.fm.get("components")
+        if not isinstance(listed, list):
+            continue
+        for cid in listed:
+            if isinstance(cid, str):
+                claims.setdefault(cid, []).append(doc.rel)
+    return {cid: tuple(sorted(paths)) for cid, paths in claims.items()}
+
+
 def resolve_walk_ref(cfg: Config) -> str | None:
     """The line the digest walks: remote-tracking first, then local.
 
@@ -1036,6 +1065,9 @@ def digest(cfg: Config, *, since: str | None = None, ref: str | None = None) -> 
     events = walk_events(cfg, ref, drop_graft=truncated)
     if since is not None:
         events = [e for e in events if e.date >= since]
+    claims = spec_index(cfg)
+    for event in events:
+        event.specs = claims.get(event.cid, ())
     return DigestResult(events=events, truncated=truncated, ref=ref, since=since)
 
 
