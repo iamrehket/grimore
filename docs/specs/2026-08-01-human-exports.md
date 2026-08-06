@@ -112,6 +112,13 @@ rewrite, a hand-edit, or a branch that bypassed lint. This is stated as a rule
 against the table rather than as further rows so that a transition nobody
 anticipated still has defined behavior.
 
+The digest reads history rather than the governed store, so it reports a
+component whose type the project has not enabled. The bundle, compiled from
+the store, omits it. That asymmetry is deliberate: a component in a disabled
+type directory is a lint error, and a catch-up report that stayed silent about
+it would hide the very change that broke lint. It is the same posture as the
+violation rule above - say what happened, including what should not have.
+
 Output ordering is commits oldest first, and within a commit by component id
 ascending. Within-commit order matters more than it looks: a squashed adoption
 commit adds tens of components at once, and without a rule their order would
