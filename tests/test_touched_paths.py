@@ -10,10 +10,24 @@ def git(root, *args):
     return r.stdout
 
 
-def make_repo(root):
-    git(root, "init", "-b", "main")
+def configure_identity(root):
+    # Per-repository, and git clone does not copy it. A repo without it falls
+    # back to hostname auto-detection, which succeeds on a developer machine
+    # and fails on a runner - so a clone that skips this passes locally and
+    # fails in CI.
     git(root, "config", "user.email", "test@example.com")
     git(root, "config", "user.name", "Test")
+
+
+def make_repo(root):
+    git(root, "init", "-b", "main")
+    configure_identity(root)
+
+
+def clone_repo(parent, src, dst):
+    git(parent, "clone", str(src), str(dst))
+    configure_identity(dst)
+    return dst
 
 
 def commit_all(root, msg):
@@ -309,8 +323,7 @@ def test_stale_local_default_branch_does_not_expand_waiver_range(tmp_path):
     (src / "x.py").write_text("x = 2\n")
     write_component(upstream, "note", "renderer", body="Updated for the tweak.", extra={"paths": "[src/render/]"})
     commit_all(upstream, "upstream tweak with component update\n\nGrim-Waive: note-renderer upstream-only reason")
-    clone = tmp_path / "clone"
-    git(tmp_path, "clone", str(upstream), str(clone))
+    clone = clone_repo(tmp_path, upstream, tmp_path / "clone")
     git(clone, "checkout", "-b", "feature")
     git(clone, "branch", "-f", "main", "origin/main~1")  # stale local main
     (clone / "src" / "render" / "x.py").write_text("x = 3\n")
@@ -333,8 +346,7 @@ def test_divergent_local_default_branch_is_ignored_when_origin_resolves(tmp_path
     src.mkdir(parents=True)
     (src / "x.py").write_text("x = 1\n")
     commit_all(upstream, "baseline")
-    clone = tmp_path / "clone"
-    git(tmp_path, "clone", str(upstream), str(clone))
+    clone = clone_repo(tmp_path, upstream, tmp_path / "clone")
     git(clone, "checkout", "-b", "feature", "origin/main")
     git(clone, "checkout", "main")
     (clone / "src" / "render" / "x.py").write_text("x = 9\n")
