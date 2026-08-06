@@ -847,6 +847,139 @@ def abandoned_references(
     )
 
 
+# The hash of the empty tree, so the root commit can be diffed against
+# something instead of being special-cased out of the walk.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# Every transition the lifecycle permits, and what the digest calls it.
+# Anything absent from this table is reported as a violation rather than
+# skipped: the schema forbids those, which is exactly why observing one is
+# worth saying.
+EVENT_LABELS = {
+    ("absent", "draft"): "added, draft",
+    ("absent", "current"): "added, live",
+    ("absent", "superseded"): "added, already superseded",
+    ("draft", "current"): "promoted",
+    ("draft", "superseded"): "abandoned",
+    ("current", "superseded"): "superseded",
+}
+
+
+@dataclasses.dataclass
+class Event:
+    """One component's transition at one landed commit."""
+
+    cid: str
+    prev: str
+    curr: str
+    label: str
+    commit: str  # abbreviated
+    date: str  # ISO date in UTC
+    violation: bool
+
+
+def _blob_status(cfg: Config, rev: str, rel: str) -> tuple[str | None, str | None]:
+    """(status, id) of a component blob, or (None, None) when it is not there."""
+    r = _git(cfg, "show", f"{rev}:{rel}")
+    if r.returncode != 0:
+        return None, None
+    m = FM_RE.match(r.stdout)
+    if not m:
+        return None, None
+    try:
+        fm = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return None, None
+    if not isinstance(fm, dict):
+        return None, None
+    coerce_fm(fm)
+    status = fm.get("status")
+    cid = fm.get("id")
+    return (status if isinstance(status, str) else None,
+            cid if isinstance(cid, str) else None)
+
+
+def _commit_utc_date(cfg: Config, sha: str) -> str:
+    """The commit's day in UTC.
+
+    Read as an epoch and converted here rather than with `--date=short`, which
+    renders in the offset the commit recorded. That is stable across machines,
+    so it survives every determinism check while still landing a commit made
+    just after local midnight at +1300 on the wrong day.
+    """
+    epoch = int(_git(cfg, "log", "-1", "--format=%ct", sha).stdout.strip())
+    return datetime.datetime.fromtimestamp(
+        epoch, datetime.timezone.utc
+    ).date().isoformat()
+
+
+def walk_events(cfg: Config, ref: str = "HEAD") -> list[Event]:
+    """Component transitions along ref's first-parent line, oldest commit first.
+
+    First-parent is what makes a pull request one event: a merge landing hides
+    the branch's own commits, and a squash landing has none to hide. The whole
+    line is walked and never cut short on a date, because git timestamps are
+    not monotonic - a rebase, a cherry-pick, or plain clock skew can put an
+    older commit behind a newer one, so meeting one proves nothing about its
+    ancestors. Filtering by date is the caller's job.
+    """
+    top = _git(cfg, "rev-parse", "--show-toplevel")
+    if top.returncode != 0:
+        return []
+    toplevel = Path(top.stdout.strip())
+    try:
+        comp_rel = cfg.components.resolve().relative_to(toplevel.resolve()).as_posix()
+    except ValueError:
+        return []
+
+    revs = _git(cfg, "rev-list", "--first-parent", "--reverse", ref)
+    if revs.returncode != 0:
+        return []
+
+    events: list[Event] = []
+    for sha in revs.stdout.split():
+        parents = _git(cfg, "rev-list", "--parents", "-n1", sha).stdout.split()[1:]
+        base = parents[0] if parents else EMPTY_TREE
+        diff = _git(
+            cfg, "diff", "--name-status", "--no-renames", base, sha, "--", comp_rel
+        )
+        if diff.returncode != 0 or not diff.stdout.strip():
+            continue
+        date = _commit_utc_date(cfg, sha)
+        short = _git(cfg, "rev-parse", "--short", sha).stdout.strip()
+        batch: list[Event] = []
+        for line in diff.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            rel = parts[1]
+            prev_status, prev_id = _blob_status(cfg, base, rel)
+            curr_status, curr_id = _blob_status(cfg, sha, rel)
+            cid = curr_id or prev_id
+            if cid is None:
+                # Neither side parses as a component - a malformed file lint
+                # will complain about. Nothing here can name a transition.
+                continue
+            prev = prev_status or "absent"
+            curr = curr_status or "absent"
+            if prev == curr:
+                continue
+            label = EVENT_LABELS.get((prev, curr))
+            batch.append(
+                Event(
+                    cid=cid,
+                    prev=prev,
+                    curr=curr,
+                    label=label or f"lifecycle violation: {prev} -> {curr}",
+                    commit=short,
+                    date=date,
+                    violation=label is None,
+                )
+            )
+        events.extend(sorted(batch, key=lambda e: e.cid))
+    return events
+
+
 def parse_implemented(value) -> tuple[str, str | None]:
     """('2026-07-24', '14') from a stamp. Raises ValueError on any other shape.
 
