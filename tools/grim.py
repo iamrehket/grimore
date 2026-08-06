@@ -913,7 +913,7 @@ def _commit_utc_date(cfg: Config, sha: str) -> str:
     ).date().isoformat()
 
 
-def walk_events(cfg: Config, ref: str = "HEAD") -> list[Event]:
+def walk_events(cfg: Config, ref: str = "HEAD", *, drop_graft: bool = False) -> list[Event]:
     """Component transitions along ref's first-parent line, oldest commit first.
 
     First-parent is what makes a pull request one event: a merge landing hides
@@ -922,6 +922,13 @@ def walk_events(cfg: Config, ref: str = "HEAD") -> list[Event]:
     not monotonic - a rebase, a cherry-pick, or plain clock skew can put an
     older commit behind a newer one, so meeting one proves nothing about its
     ancestors. Filtering by date is the caller's job.
+
+    drop_graft discards the events of any parentless commit. In a truncated
+    clone the oldest visible commit has no parent to diff against, so every
+    component present there looks newly added - a confident wrong answer about
+    decisions that may have been live for months. Callers set it when the
+    repository is shallow; on a complete history the root commit genuinely
+    does introduce its components, so it stays off.
     """
     top = _git(cfg, "rev-parse", "--show-toplevel")
     if top.returncode != 0:
@@ -939,6 +946,8 @@ def walk_events(cfg: Config, ref: str = "HEAD") -> list[Event]:
     events: list[Event] = []
     for sha in revs.stdout.split():
         parents = _git(cfg, "rev-list", "--parents", "-n1", sha).stdout.split()[1:]
+        if not parents and drop_graft:
+            continue
         base = parents[0] if parents else EMPTY_TREE
         diff = _git(
             cfg, "diff", "--name-status", "--no-renames", base, sha, "--", comp_rel
@@ -978,6 +987,56 @@ def walk_events(cfg: Config, ref: str = "HEAD") -> list[Event]:
             )
         events.extend(sorted(batch, key=lambda e: e.cid))
     return events
+
+
+@dataclasses.dataclass
+class DigestResult:
+    events: list[Event]
+    truncated: bool  # history was incomplete, so the answer is bounded by it
+    ref: str
+    since: str | None
+
+
+def resolve_walk_ref(cfg: Config) -> str | None:
+    """The line the digest walks: remote-tracking first, then local.
+
+    Same order and same reason as the merge-base resolution - origin/<default>
+    is what a pull request actually merges into, so a stale or divergent local
+    ref must never be preferred. This resolves the ref and nothing else; it is
+    not a test of whether history is deep enough, which is a different failure
+    that a deep-enough shallow clone passes.
+    """
+    for ref in (f"origin/{cfg.default_branch}", cfg.default_branch):
+        if _git(cfg, "rev-parse", "--verify", "--quiet", ref).returncode == 0:
+            return ref
+    return None
+
+
+def is_shallow(cfg: Config) -> bool:
+    r = _git(cfg, "rev-parse", "--is-shallow-repository")
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def digest(cfg: Config, *, since: str | None = None, ref: str | None = None) -> DigestResult:
+    """Lifecycle events on the default branch, optionally bounded by date.
+
+    `since` is inclusive of the named day and resolves in UTC, so the answer
+    does not depend on the timezone of the machine asking.
+
+    On a truncated clone the digest still answers, from the earliest commit it
+    can see, and says so. The flag is unconditional: because timestamps are not
+    monotonic, a graft point earlier than the boundary is no proof that the
+    part we cannot see held nothing in range. Over-reporting incompleteness is
+    the safe direction; the unsafe one is a partial answer that looks whole.
+    """
+    if since is not None:
+        datetime.date.fromisoformat(since)  # raises on a malformed boundary
+    ref = ref or resolve_walk_ref(cfg) or "HEAD"
+    truncated = is_shallow(cfg)
+    events = walk_events(cfg, ref, drop_graft=truncated)
+    if since is not None:
+        events = [e for e in events if e.date >= since]
+    return DigestResult(events=events, truncated=truncated, ref=ref, since=since)
 
 
 def parse_implemented(value) -> tuple[str, str | None]:

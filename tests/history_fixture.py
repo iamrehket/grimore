@@ -27,6 +27,17 @@ class History:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._git("init", "-b", "main")
+        self._configure()
+
+    @classmethod
+    def existing(cls, root: Path) -> "History":
+        """Drive a repository that is already there, such as a clone."""
+        h = cls.__new__(cls)
+        h.root = Path(root)
+        h._configure()
+        return h
+
+    def _configure(self):
         # Per-repository and never inherited by a clone; without it git falls
         # back to hostname auto-detection, which fails on a bare runner.
         self._git("config", "user.email", "test@example.com")
