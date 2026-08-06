@@ -1,7 +1,7 @@
 ---
 id: nongoal-static-site-tree
 type: nongoal
-status: draft
+status: current
 date: 2026-08-01
 ---
 

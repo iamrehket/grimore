@@ -3,8 +3,8 @@ spec: docs/specs/2026-08-01-human-exports.md
 ---
 
 <!-- grim:status -->
-> **Not yet implemented.**
-> Not fully realized: adr-digest-reads-git-history, adr-digest-walks-first-parent, adr-exports-print-to-stdout, constraint-deterministic-human-exports, constraint-deterministic-rendered-view, nongoal-static-site-generator-wiring, nongoal-static-site-tree, usecase-bundle-without-code-access, usecase-catch-up-by-landing still draft.
+> **Implemented 2026-08-06 (PR #18).**
+> References current.
 <!-- /grim:status -->
 
 # Human Exports (IAM-45) Implementation Plan

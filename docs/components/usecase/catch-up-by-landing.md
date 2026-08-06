@@ -1,7 +1,8 @@
 ---
 id: usecase-catch-up-by-landing
 type: usecase
-status: draft
+status: current
+supersedes: [usecase-catch-up-digest]
 date: 2026-08-02
 ---
 

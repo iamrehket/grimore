@@ -1,7 +1,7 @@
 ---
 id: adr-exports-print-to-stdout
 type: adr
-status: draft
+status: current
 date: 2026-08-01
 ---
 

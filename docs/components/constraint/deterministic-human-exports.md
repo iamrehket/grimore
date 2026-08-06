@@ -1,7 +1,7 @@
 ---
 id: constraint-deterministic-human-exports
 type: constraint
-status: draft
+status: current
 date: 2026-08-01
 ---
 

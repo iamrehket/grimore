@@ -1,7 +1,8 @@
 ---
 id: nongoal-static-site-generator-wiring
 type: nongoal
-status: draft
+status: current
+supersedes: [nongoal-static-site-integration]
 date: 2026-08-01
 ---
 

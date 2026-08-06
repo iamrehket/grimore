@@ -1,7 +1,8 @@
 ---
 id: constraint-deterministic-rendered-view
 type: constraint
-status: draft
+status: current
+supersedes: [constraint-deterministic-render]
 date: 2026-08-01
 ---
 

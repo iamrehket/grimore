@@ -1,7 +1,7 @@
 ---
 id: adr-digest-walks-first-parent
 type: adr
-status: draft
+status: current
 date: 2026-08-01
 ---
 

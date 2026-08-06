@@ -1,7 +1,7 @@
 ---
 id: usecase-bundle-without-code-access
 type: usecase
-status: draft
+status: current
 date: 2026-08-01
 ---
 
