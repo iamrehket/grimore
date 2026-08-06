@@ -251,8 +251,23 @@ earlier in this plan creates it; open it as a draft before starting this task.
 under the components and specs directories. Task 0 committed the inputs, but
 anything added since - new components, an amended draft - must be staged too.
 
-**Run the survey, then supply a verdict for every component in scope**: the
-nine drafts, plus each of the three live targets being replaced.
+**Run the survey.** No verdicts, so it writes nothing, prints the drafts in
+scope with the reason each is there, offers a note worklist, and exits 4 -
+"input required", not a failure. Rehearsed on 2026-08-06 against the committed
+inputs: it found the spec from the branch diff, put all nine drafts in scope,
+and confirmed the three live targets are **not** in scope on their own.
+
+**Decide the note worklist.** The survey offers groups of changed files that
+no live component claims, capped at five. The 2026-08-06 rehearsal offered two
+- `tests/` and `.github/` - from Task 1 alone, and implementation will add
+more. Decide deliberately per group whether a `note` component earns its
+place; the default is no, since a note is a durable subsystem fact rather than
+a record that files changed.
+
+**Then supply a verdict for every component in scope**: the nine drafts, plus
+each of the three live targets being replaced. The outcome vocabulary is
+`promote`, `amend`, `supersede`, `drop`, `keep-draft` - use those words
+exactly.
 
 *Trap:* there is no cascade. Reconciliation deliberately refuses to flip a
 live component that no verdict names - the comment on `check_edges_accounted`
@@ -270,6 +285,14 @@ The three replacements: `constraint-deterministic-render` by
 `nongoal-static-site-generator-wiring`, and `usecase-catch-up-digest` by
 `usecase-catch-up-by-landing`. All three targets render into `charter.md` or
 `decisions.md`, so the flip changes the committed views.
+
+**Dry run before applying anything.** Pass the full verdict set with
+`--dry-run` first. It applies the writes, checks them against grim, and rolls
+back, so it verifies as strongly as a real run while leaving the tree
+untouched. Read the report - every promote, amend, supersede edge and target
+flip - and only then run it for real. Reconciliation is the newest code in the
+project and this branch is the largest thing it has ever been asked to do;
+looking before writing costs one command.
 
 **Then stamp, and verify with the full sequence** - `grim lint --fix`, then
 `grim render`, then `grim check`. Check is not optional decoration here: it is
