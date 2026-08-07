@@ -331,8 +331,9 @@ def test_keep_draft_conflicting_with_a_supersede_is_refused(tmp_path):
 
 
 def test_unaccounted_supersede_edge_is_refused(tmp_path):
-    # An agent that hand-writes supersedes: before running would otherwise flip
-    # a live decision with nobody stating that it should be flipped.
+    # A capture-time edge is the normal path, not evasion - but the flip must
+    # still be stated: without a verdict naming the target, promotion would
+    # cascade onto a live decision with nobody saying it should be flipped.
     repo(tmp_path)
     component(tmp_path, "old", status="current")
     commit(tmp_path, "baseline")
@@ -365,6 +366,24 @@ def test_preauthored_edge_is_not_duplicated(tmp_path):
     text = (tmp_path / "docs/components/adr/new.md").read_text()
     assert text.count("adr-old") == 1
     assert "supersedes: [adr-old]" in text
+
+
+def test_drop_of_an_edge_carrying_draft_is_clean(tmp_path):
+    # A capture-time edge takes effect only at promotion. Dropping the draft
+    # leaves the edge dead in a superseded file and the target untouched.
+    repo(tmp_path)
+    component(tmp_path, "old", status="current")
+    commit(tmp_path, "baseline")
+    branch(tmp_path)
+    component(tmp_path, "new", status="draft", supersedes=["adr-old"])
+    spec(tmp_path, "s.md", ["adr-new"])
+    commit(tmp_path, "work")
+    result = run(tmp_path, "--branch-diff", "--verdict", "adr-new:drop:never built")
+    assert result.returncode == OK, result.stderr
+    assert "status: current" in (tmp_path / "docs/components/adr/old.md").read_text()
+    new = (tmp_path / "docs/components/adr/new.md").read_text()
+    assert "status: superseded" in new
+    assert "supersedes: [adr-old]" in new
 
 
 def test_supersede_cycle_is_refused(tmp_path):

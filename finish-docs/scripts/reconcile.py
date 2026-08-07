@@ -365,10 +365,12 @@ def check_edges_accounted(plan: Plan, statuses: dict[str, str],
                           existing: dict[str, list[str]]) -> None:
     """Every edge target of a promoted component must be explicitly superseded.
 
-    Printing the edge is not enough: an agent that hand-writes supersedes: into
-    a component body before running would route around the report entirely. And
-    an auto-cascade would flip a live decision without anyone stating that it
-    should be flipped, which is the whole failure this skill exists to prevent.
+    The edge is normally authored at capture time (align writes it on the
+    draft), so its presence proves nothing about intent to flip the target at
+    this branch's finish. Without this check, promotion would cascade onto a
+    live decision with nobody stating that it should be flipped, which is the
+    whole failure this skill exists to prevent - the verdict is required
+    regardless of who authored the edge.
     """
     for cid, intent in sorted(plan.intents.items()):
         if intent != CURRENT:
