@@ -1,7 +1,7 @@
 ---
 id: adr-edge-authored-at-capture
 type: adr
-status: draft
+status: current
 date: 2026-08-07
 ---
 
