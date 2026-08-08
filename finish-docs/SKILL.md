@@ -94,6 +94,11 @@ tooling cannot make for you.
 **An amendment must never reverse a decision's substance.** If it would, that
 is not an amendment: write a new component and use `supersede=` instead.
 
+A draft that already carries a `supersedes:` edge from its align session is
+the normal case, not a violation - leave the edge alone. The verdict on the
+target still states the flip; `supersede=` writes the edge only when the
+draft does not already carry it.
+
 ```bash
 uv run --no-project <skill-dir>/scripts/reconcile.py \
   --root <target> --branch-diff \
@@ -176,10 +181,14 @@ components with `--component`, or take the no-spec fast path.
 usually because a `supersede=` promotes a successor that also carries its own
 verdict. Decide which one stands.
 
-**"no verdict accounts for target Y"** - the component being promoted already
-carries a `supersedes:` edge naming Y. Promoting it would flip Y silently. Add
-`--component Y --verdict 'Y:supersede=<promoted>:<why>'` so the flip is stated.
-Do not author `supersedes:` by hand; let `supersede=` write the edge.
+**"no verdict accounts for target Y"** - the component being promoted
+carries a `supersedes:` edge naming Y, normally authored at capture time
+(align writes the edge on the draft; SCHEMA.md has it take effect at
+promotion). Promoting it would flip Y silently. Add
+`--component Y --verdict 'Y:supersede=<promoted>:<why>'` so the flip is
+stated rather than inferred. The edge never substitutes for the verdict,
+and the verdict never requires stripping the edge - state the flip and let
+`supersede=` write any edge the draft does not already carry.
 
 **"still draft, so nothing justifies an implemented claim"** - reconcile the
 draft before stamping. That is step 2.

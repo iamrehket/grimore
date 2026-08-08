@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build the scenario-shipped-branch fixture described in
-finish-docs/tests/scenario-shipped-branch.md.
+"""Build the fixture for one of the finish-docs test scenarios
+(`--scenario shipped|contradicted|preauthored`, each described by the
+matching scenario-*.md in this directory).
 
 Deliberately NOT inside grimore: a skill that assumes grimore-relative paths
 must fail against this tree.
@@ -249,6 +250,133 @@ CONFIG_AFTER = '''\
 COLUMN_ORDER = {}
 '''
 
+# The `preauthored` scenario. Main already ships the streaming CSV exporter
+# its two live decisions describe; the branch replaces CSV with Parquet and
+# its draft carries a capture-time `supersedes:` edge naming adr-csv-only,
+# exactly as an align session authors it. The reconciler must accept that
+# edge as-is: promotion refuses until a verdict names the target, and the
+# right move is to state the flip, never to strip or hand-flip anything.
+CODE_CSV_MAIN = '''\
+"""Order exports."""
+
+import csv
+
+
+def export_orders(cursor, out):
+    """Stream rows to `out` as CSV, header first, as they arrive."""
+    writer = csv.writer(out, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(cursor.column_names)
+    for row in cursor:
+        writer.writerow(list(row))
+'''
+
+PARQUET_EXPORT = """\
+---
+id: adr-parquet-export
+type: adr
+status: draft
+supersedes: [adr-csv-only]
+date: 2026-08-05
+---
+
+# Exports are Parquet, not CSV
+
+Both warehouse-bound customers ingest exports into columnar stores and were
+re-typing CSV back into typed columns by hand, and the last three export
+bugs were all CSV quoting bugs. Exports therefore switch to Parquet: typed
+columns, no escaping surface, and fixed-size row groups written as rows
+arrive so streaming stays intact. Trade-off accepted: a spreadsheet user can
+no longer open an export directly and gets a converter later rather than a
+format flag now - the same one-format rule the CSV decision set, with the
+format changed.
+"""
+
+SPEC_PARQUET = """\
+---
+components: [adr-parquet-export]
+---
+
+<!-- grim:status -->
+<!-- /grim:status -->
+
+# Parquet exports - Design
+
+Date: 2026-08-05
+
+## Problem
+
+Both warehouse-bound customers re-type every CSV export back into typed
+columns, and the last three export bugs were all CSV quoting bugs.
+
+## Approach
+
+Replace the CSV writer with a Parquet writer that emits fixed-size row
+groups as rows arrive from the cursor. The alternative considered was a
+format flag offering Parquet alongside CSV, rejected because the CSV
+decision already ruled a format flag out and no caller still wants CSV.
+
+## Decisions
+
+- Exports switch to Parquet, replacing the CSV-only decision:
+  adr-parquet-export (supersedes adr-csv-only)
+
+## Out of scope
+
+A CSV-to-Parquet converter for spreadsheet users, and any second format.
+"""
+
+PLAN_PARQUET = """\
+---
+spec: docs/specs/2026-08-05-parquet.md
+---
+
+<!-- grim:status -->
+<!-- /grim:status -->
+
+# Plan: parquet exports
+
+1. Replace the CSV writer in `src/exports.py` with a row-group Parquet
+   writer.
+2. Keep the batch size fixed so the largest tenant's export stays inside
+   the worker's memory budget.
+3. Cover an empty result set and a multi-group export with tests.
+"""
+
+CODE_PARQUET = '''\
+"""Order exports."""
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+ROW_GROUP_SIZE = 10_000
+
+
+def export_orders(cursor, out):
+    """Write the result set to `out` as Parquet, one row group per batch.
+
+    Rows drain from the cursor in fixed-size batches as they arrive, so the
+    largest tenant's export still fits the worker's memory budget.
+    """
+    writer = None
+    batch = []
+    for row in cursor:
+        batch.append(list(row))
+        if len(batch) == ROW_GROUP_SIZE:
+            writer = _write_group(writer, out, cursor.column_names, batch)
+            batch = []
+    writer = _write_group(writer, out, cursor.column_names, batch)
+    writer.close()
+
+
+def _write_group(writer, out, names, rows):
+    columns = {name: [row[i] for row in rows] for i, name in enumerate(names)}
+    table = pa.table(columns)
+    if writer is None:
+        writer = pq.ParquetWriter(out, table.schema)
+    writer.write_table(table)
+    return writer
+'''
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a finish-docs test fixture.")
@@ -258,10 +386,12 @@ def main() -> int:
     # baseline-green's rubric line 8 is verified by replaying the mechanical
     # path from its pre-run commit. Changing that tree in place would
     # retroactively invalidate both writeups.
-    parser.add_argument("--scenario", choices=("shipped", "contradicted"),
+    parser.add_argument("--scenario",
+                        choices=("shipped", "contradicted", "preauthored"),
                         default="shipped")
     args = parser.parse_args()
     contradicted = args.scenario == "contradicted"
+    preauthored = args.scenario == "preauthored"
 
     root = Path(args.root).resolve()
     if root.exists():
@@ -280,7 +410,9 @@ def main() -> int:
     write(root, ".grimore.toml", GRIMORE_TOML)
     write(root, "docs/components/adr/csv-only.md", CSV_ONLY)
     write(root, "docs/components/adr/streaming-writer.md", STREAMING_WRITER)
-    write(root, "src/exports.py", CODE_BEFORE)
+    # For `preauthored`, main's code already matches its two live decisions -
+    # the branch under test replaces the format, not the buffering.
+    write(root, "src/exports.py", CODE_CSV_MAIN if preauthored else CODE_BEFORE)
     write(root, "README.md", "# acme-exports\n\nOrder export service.\n")
     if contradicted:
         write(root, "src/config.py", CONFIG_BEFORE)
@@ -298,17 +430,26 @@ def main() -> int:
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "chore: adopt doc components")
 
-    git(root, "checkout", "-q", "-b", "feature/exports")
-    write(root, "docs/components/adr/column-order-config.md", COLUMN_ORDER)
-    write(root, "docs/specs/2026-07-20-exports.md", SPEC_EXPORTS)
-    write(root, "docs/specs/2026-07-21-column-order.md", SPEC_COLUMN_ORDER)
-    write(root, "docs/plans/2026-07-20-exports.md", PLAN_EXPORTS)
-    write(root, "docs/plans/2026-07-21-column-order.md", PLAN_COLUMN_ORDER)
-    write(root, "src/exports.py", CODE_AFTER_CONTRADICTED if contradicted else CODE_AFTER)
-    if contradicted:
-        write(root, "src/config.py", CONFIG_AFTER)
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "feat: stream CSV exports in configured column order")
+    if preauthored:
+        git(root, "checkout", "-q", "-b", "feature/parquet")
+        write(root, "docs/components/adr/parquet-export.md", PARQUET_EXPORT)
+        write(root, "docs/specs/2026-08-05-parquet.md", SPEC_PARQUET)
+        write(root, "docs/plans/2026-08-05-parquet.md", PLAN_PARQUET)
+        write(root, "src/exports.py", CODE_PARQUET)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "feat: export orders as parquet")
+    else:
+        git(root, "checkout", "-q", "-b", "feature/exports")
+        write(root, "docs/components/adr/column-order-config.md", COLUMN_ORDER)
+        write(root, "docs/specs/2026-07-20-exports.md", SPEC_EXPORTS)
+        write(root, "docs/specs/2026-07-21-column-order.md", SPEC_COLUMN_ORDER)
+        write(root, "docs/plans/2026-07-20-exports.md", PLAN_EXPORTS)
+        write(root, "docs/plans/2026-07-21-column-order.md", PLAN_COLUMN_ORDER)
+        write(root, "src/exports.py", CODE_AFTER_CONTRADICTED if contradicted else CODE_AFTER)
+        if contradicted:
+            write(root, "src/config.py", CONFIG_AFTER)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "feat: stream CSV exports in configured column order")
 
     print(f"fixture at {root} ({args.scenario})")
     return 0

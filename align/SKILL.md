@@ -162,7 +162,10 @@ Procedure per capture:
    reverse a decision's substance. If the session reverses a decision
    that predates it (an existing current component), author the new
    draft with a supersedes: edge instead - the edge takes effect at
-   promotion, not now, and this skill never promotes. A draft written
+   promotion, not now, and this skill never promotes. At branch finish,
+   finish-docs will still require a verdict naming the superseded
+   target; the edge is the record of the decision, the verdict is what
+   flips it. A draft written
    under a wrong slug captured no settled decision - that is a mistake,
    not a lifecycle event: delete the file and rewrite it under the
    correct slug; no superseded flip, no supersedes edge.
