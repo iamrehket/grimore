@@ -1,7 +1,7 @@
 ---
 id: constraint-no-paths-in-prose
 type: constraint
-status: current
+status: superseded
 date: 2026-07-24
 ---
 

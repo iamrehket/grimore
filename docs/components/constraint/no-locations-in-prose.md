@@ -1,7 +1,7 @@
 ---
 id: constraint-no-locations-in-prose
 type: constraint
-status: draft
+status: current
 supersedes: [constraint-no-paths-in-prose]
 date: 2026-08-09
 ---
