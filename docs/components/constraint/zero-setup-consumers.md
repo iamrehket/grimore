@@ -1,7 +1,7 @@
 ---
 id: constraint-zero-setup-consumers
 type: constraint
-status: draft
+status: current
 supersedes: [constraint-zero-setup-consumption]
 date: 2026-08-09
 ---
