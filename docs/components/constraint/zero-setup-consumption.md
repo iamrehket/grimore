@@ -1,7 +1,7 @@
 ---
 id: constraint-zero-setup-consumption
 type: constraint
-status: current
+status: superseded
 date: 2026-07-24
 ---
 
