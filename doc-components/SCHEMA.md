@@ -118,8 +118,11 @@ fires nothing. Keep the list short.
   `<!-- grim:ok -->` to a line to mark a deliberate mention.
 - **usecase / constraint / nongoal** — `# Title` plus one terse prose
   paragraph. Non-goals state what is excluded and why.
-- **note** — terse factual prose about one subsystem. No file paths or
-  code snippets in prose; use `paths:` frontmatter.
+- **note** — terse factual prose about one subsystem; use `paths:`
+  frontmatter for the paths the fact governs.
+
+Across every type, prose names no locations and no code; a file that is the
+component's own subject may be named. See `constraint-no-locations-in-prose`.
 
 ## Working layer
 
